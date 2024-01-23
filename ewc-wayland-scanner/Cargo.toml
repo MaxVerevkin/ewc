@@ -1,0 +1,19 @@
+[package]
+name = "ewc-wayland-scanner"
+version = "0.1.0"
+authors.workspace = true
+readme.workspace = true
+edition.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+wayrs-proto-parser = "1.0"
+proc-macro2 = "1.0"
+quote = "1.0"
+
+[dependencies.syn]
+version = "2.0"
+default-features = false
+features = ["parsing", "proc-macro"]

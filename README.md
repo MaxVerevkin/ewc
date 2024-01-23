@@ -1,0 +1,1 @@
+# EWC - Explorary Wayland Compositor
