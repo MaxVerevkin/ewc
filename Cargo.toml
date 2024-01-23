@@ -15,7 +15,6 @@ edition.workspace = true
 
 [dependencies]
 ewc-wayland-scanner = { path = "ewc-wayland-scanner" }
-hashbrown = "0.14.3"
 libc = "0.2"
 memmap2 = "0.8"
 pixman = "0.1"

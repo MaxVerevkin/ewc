@@ -1,8 +1,7 @@
+use std::collections::HashMap;
 use std::ffi::c_int;
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
-
-use hashbrown::HashMap;
 
 use crate::client::ClientId;
 

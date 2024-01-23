@@ -1,11 +1,8 @@
-use std::cell::Cell;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::io;
 use std::num::Wrapping;
-use std::rc::Rc;
-use std::rc::Weak;
-
-use hashbrown::HashMap;
+use std::rc::{Rc, Weak};
 
 use super::xdg_shell;
 use super::IsGlobal;
@@ -247,11 +244,17 @@ impl IsGlobal for WlSubcompositor {
                 Request::Destroy => (),
                 Request::GetSubsurface(args) => {
                     args.id.set_callback(wl_subsurface_cb);
-                    let [surface, parent] = ctx
+                    let surface = ctx
                         .client
                         .compositor
                         .surfaces
-                        .get_many_mut([&args.surface, &args.parent])
+                        .get(&args.surface)
+                        .ok_or_else(|| io::Error::other("invalid id in get_subsurface"))?;
+                    let parent = ctx
+                        .client
+                        .compositor
+                        .surfaces
+                        .get(&args.parent)
                         .ok_or_else(|| io::Error::other("invalid id in get_subsurface"))?;
                     if surface.has_role() {
                         return Err(io::Error::other("surface already has a role"));

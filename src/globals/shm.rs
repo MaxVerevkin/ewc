@@ -1,6 +1,5 @@
+use std::collections::HashMap;
 use std::io;
-
-use hashbrown::HashMap;
 
 use super::IsGlobal;
 use crate::backend::{BufferId, ShmPoolId};

@@ -2,21 +2,17 @@
 #![feature(inline_const_pat, pointer_is_aligned)]
 
 use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::io;
-use std::os::fd::AsRawFd;
-use std::os::fd::FromRawFd;
-use std::os::fd::OwnedFd;
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
-use std::rc::Rc;
-use std::rc::Weak;
+use std::rc::{Rc, Weak};
 
 use globals::compositor::Surface;
 use globals::seat::BTN_LEFT;
 use globals::xdg_shell::XdgToplevelRole;
-use hashbrown::HashMap;
-use hashbrown::HashSet;
 use xkbcommon::xkb;
 
 mod backend;
