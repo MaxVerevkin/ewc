@@ -33,7 +33,7 @@ default-features = false
 features = ["socket", "uio"]
 
 [patch.crates-io]
-pixman = { path = "../pixman-rs/pixman" }
+pixman = { git = "https://github.com/MaxVerevkin/pixman-rs", branch = "overlype-enum" }
 
 [profile.release]
 overflow-checks = true

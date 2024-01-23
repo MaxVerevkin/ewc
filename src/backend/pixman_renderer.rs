@@ -67,7 +67,7 @@ impl Renderer<'_> {
             y2: height as i32,
         };
         let op = if opaque_region.is_some_and(|reg| {
-            reg.contains_rectangle(buf_rect) == Some(pixman::Overlap::In) && alpha == 1.0
+            reg.contains_rectangle(buf_rect) == pixman::Overlap::In && alpha == 1.0
         }) {
             pixman::Operation::Src
         } else {
