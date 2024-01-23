@@ -12,12 +12,12 @@ use xkbcommon::xkb;
 use super::{Global, IsGlobal};
 use crate::client::RequestCtx;
 use crate::protocol::*;
-use crate::wayland_core::Proxy;
+use crate::wayland_core::{Fixed, Proxy};
 use crate::Client;
 
 // pub const BTN_MOUSE: u32 = 0x110;
 pub const BTN_LEFT: u32 = 0x110;
-pub const BTN_RIGHT: u32 = 0x111;
+// pub const BTN_RIGHT: u32 = 0x111;
 // pub const BTN_MIDDLE: u32 = 0x112;
 // pub const BTN_SIDE: u32 = 0x113;
 // pub const BTN_EXTRA: u32 = 0x114;
@@ -29,7 +29,8 @@ pub struct Seat {
     keymap_file: File,
     keymap_file_size: u32,
 
-    pub focused_surface: Option<WlSurface>,
+    kbd_focused_surface: Option<WlSurface>,
+    ptr_focused_surface: Option<(WlSurface, f32, f32)>,
 
     mods: ModsState,
     pub xkb_state: xkb::State,
@@ -115,7 +116,8 @@ impl Seat {
             keymap_file,
             keymap_file_size,
 
-            focused_surface: None,
+            kbd_focused_surface: None,
+            ptr_focused_surface: None,
 
             mods: ModsState::get(&xkb_state),
             xkb_state,
@@ -125,22 +127,91 @@ impl Seat {
         }
     }
 
-    pub fn focus_surface(&mut self, surface: Option<WlSurface>) {
-        if self.focused_surface == surface {
+    pub fn kbd_focus_surface(&mut self, surface: Option<WlSurface>) {
+        if self.kbd_focused_surface == surface {
             return;
         }
 
-        if let Some(old_surf) = &self.focused_surface {
-            for kbd in old_surf.conn().seat.keyboards.borrow().iter() {
-                kbd.wl.leave(1, old_surf);
+        if let Some(old_surf) = &self.kbd_focused_surface {
+            if old_surf.is_alive() {
+                for kbd in old_surf.conn().seat.keyboards.borrow().iter() {
+                    kbd.wl.leave(1, old_surf);
+                }
             }
         }
 
-        self.focused_surface = surface;
-        if let Some(new_surf) = &self.focused_surface {
+        self.kbd_focused_surface = surface;
+        if let Some(new_surf) = &self.kbd_focused_surface {
             for kbd in new_surf.conn().seat.keyboards.borrow().iter() {
-                self.enter(&kbd.wl, new_surf);
+                self.kbd_enter(&kbd.wl);
             }
+        }
+    }
+
+    pub fn ptr_forward_pointer(&mut self, surface: Option<(WlSurface, f32, f32)>) {
+        if let Some((surface, x, y)) = &surface {
+            if let Some((focused, _, _)) = &self.ptr_focused_surface {
+                if surface == focused {
+                    for ptr in surface.conn().seat.pointers.borrow().iter() {
+                        ptr.wl.motion(0, Fixed::from(*x), Fixed::from(*y));
+                    }
+                    return;
+                }
+            }
+        }
+
+        if let Some((old_surf, _, _)) = &self.ptr_focused_surface {
+            if old_surf.is_alive() {
+                for ptr in old_surf.conn().seat.pointers.borrow().iter() {
+                    ptr.wl.leave(1, old_surf);
+                }
+            }
+        }
+
+        self.ptr_focused_surface = surface;
+        if let Some((new_surf, _x, _y)) = &self.ptr_focused_surface {
+            for ptr in new_surf.conn().seat.pointers.borrow().iter() {
+                self.ptr_enter(&ptr.wl);
+            }
+        }
+    }
+
+    pub fn ptr_forward_btn(&mut self, btn: u32, pressed: bool) {
+        let state = if pressed {
+            wl_pointer::ButtonState::Pressed
+        } else {
+            wl_pointer::ButtonState::Released
+        };
+        if let Some((new_surf, _x, _y)) = &self.ptr_focused_surface {
+            for ptr in new_surf.conn().seat.pointers.borrow().iter() {
+                ptr.wl.button(1, 0, btn, state);
+            }
+        }
+    }
+
+    fn kbd_enter(&self, wl_keyboard: &WlKeyboard) {
+        if let Some(surf) = &self.kbd_focused_surface {
+            wl_keyboard.enter(1, surf, Vec::new());
+            self.mods.send(1, wl_keyboard);
+        }
+    }
+
+    fn ptr_enter(&self, wl_pointer: &WlPointer) {
+        if let Some((surf, x, y)) = &self.ptr_focused_surface {
+            wl_pointer.enter(1, surf, Fixed::from(*x), Fixed::from(*y));
+        }
+    }
+
+    pub fn unfocus_surface(&mut self, wl_surface: &WlSurface) {
+        if self.kbd_focused_surface.as_ref() == Some(wl_surface) {
+            self.kbd_focus_surface(None);
+        }
+        if self
+            .ptr_focused_surface
+            .as_ref()
+            .is_some_and(|x| x.0 == *wl_surface)
+        {
+            self.ptr_forward_pointer(None);
         }
     }
 
@@ -157,7 +228,7 @@ impl Seat {
         let mods = ModsState::get(&self.xkb_state);
         if self.mods != mods {
             self.mods = mods;
-            if let Some(focused_surf) = &self.focused_surface {
+            if let Some(focused_surf) = &self.kbd_focused_surface {
                 for kbd in focused_surf.conn().seat.keyboards.borrow().iter() {
                     mods.send(1, &kbd.wl);
                 }
@@ -170,16 +241,11 @@ impl Seat {
             wl_keyboard::KeyState::Released
         };
 
-        if let Some(focused_surf) = &self.focused_surface {
+        if let Some(focused_surf) = &self.kbd_focused_surface {
             for kbd in focused_surf.conn().seat.keyboards.borrow().iter() {
                 kbd.wl.key(1, 0, key, state);
             }
         }
-    }
-
-    pub fn enter(&self, wl_keyboard: &WlKeyboard, wl_surface: &WlSurface) {
-        wl_keyboard.enter(1, wl_surface, Vec::new());
-        self.mods.send(1, wl_keyboard);
     }
 
     pub fn get_mods(&self) -> ModsMask {
@@ -213,6 +279,11 @@ impl IsGlobal for WlSeat {
             match ctx.request {
                 Request::GetPointer(wl_pointer) => {
                     wl_pointer.set_callback(wl_pointer_cb);
+                    if let Some((surf, _x, _y)) = &ctx.state.seat.ptr_focused_surface {
+                        if surf.client_id() == ctx.client.conn.client_id() {
+                            ctx.state.seat.ptr_enter(&wl_pointer);
+                        }
+                    }
                     ctx.client
                         .conn
                         .seat
@@ -228,9 +299,9 @@ impl IsGlobal for WlSeat {
                         ctx.state.seat.keymap_file_size,
                     );
                     wl_keyboard.repeat_info(40, 300);
-                    if let Some(surf) = &ctx.state.seat.focused_surface {
+                    if let Some(surf) = &ctx.state.seat.kbd_focused_surface {
                         if surf.client_id() == ctx.client.conn.client_id() {
-                            ctx.state.seat.enter(&wl_keyboard, surf);
+                            ctx.state.seat.kbd_enter(&wl_keyboard);
                         }
                     }
                     ctx.client
@@ -262,7 +333,16 @@ fn wl_keyboard_cb(ctx: RequestCtx<WlKeyboard>) -> io::Result<()> {
 fn wl_pointer_cb(ctx: RequestCtx<WlPointer>) -> io::Result<()> {
     use wl_pointer::Request;
     match ctx.request {
-        Request::SetCursor(_) => todo!(),
+        Request::SetCursor(args) => match args.surface {
+            None => ctx.state.cursor = None,
+            Some(surf) => {
+                let surface = ctx.client.compositor.surfaces.get(&surf).unwrap();
+                if surface.has_role() {
+                    return Err(io::Error::other("surface already has a role"));
+                }
+                ctx.state.cursor = Some((surface.clone(), args.hotspot_x, args.hotspot_y));
+            }
+        },
         Request::Release => {
             ctx.client
                 .conn

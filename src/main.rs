@@ -12,8 +12,8 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::rc::Weak;
 
-use backend::BufferId;
 use globals::compositor::Surface;
+use globals::seat::BTN_LEFT;
 use globals::xdg_shell::XdgToplevelRole;
 use hashbrown::HashMap;
 use hashbrown::HashSet;
@@ -49,7 +49,7 @@ pub struct State {
     pub globals: Vec<Global>,
     pub backend: Box<dyn Backend>,
     pub seat: Seat,
-    pub cursor: Option<BufferId>,
+    pub cursor: Option<(Rc<Surface>, i32, i32)>,
     pub focus_stack: Vec<Weak<XdgToplevelRole>>,
     pub moving_toplevel: Option<(Weak<XdgToplevelRole>, f32, f32, i32, i32)>,
 }
@@ -69,18 +69,73 @@ impl Server {
         self.state
             .focus_stack
             .retain(|s| s.upgrade().unwrap().wl.client_id() != client_id);
-        if self
-            .state
-            .seat
-            .focused_surface
-            .as_ref()
-            .is_some_and(|s| s.client_id() == client_id)
-        {
-            self.state.seat.focused_surface = None;
-        }
         let client = self.clients.remove(&client_id).unwrap();
         client.shm.destroy(&mut self.state);
         self.event_loop.remove(client.conn.as_raw_fd()).unwrap();
+    }
+
+    pub fn toplevel_at(&self, x: i32, y: i32) -> Option<usize> {
+        for (toplevel_i, toplevel) in self.state.focus_stack.iter().enumerate().rev() {
+            let tl = toplevel.upgrade().unwrap();
+            let xdg = tl.xdg_surface.upgrade().unwrap();
+            let Some(geom) = xdg.get_window_geometry() else { continue };
+            let tlx = x - tl.x.get();
+            let tly = y - tl.y.get();
+            if tlx >= 0
+                && tly >= 0
+                && tlx < geom.width.get() as i32
+                && tly < geom.height.get() as i32
+            {
+                return Some(toplevel_i);
+            }
+        }
+        None
+    }
+
+    pub fn surface_at(&self, x: i32, y: i32) -> Option<(usize, Rc<Surface>, f32, f32)> {
+        fn surface_at(surf: Rc<Surface>, x: i32, y: i32) -> Option<(Rc<Surface>, i32, i32)> {
+            for subs in surf.cur.borrow().subsurfaces.iter().rev() {
+                if let Some(res) = surface_at(
+                    subs.surface.clone(),
+                    x - subs.position.0,
+                    y - subs.position.1,
+                ) {
+                    return Some(res);
+                }
+            }
+            let (_, w, h) = surf.cur.borrow().buffer?;
+            let ok = x >= 0
+                && y >= 0
+                && x < w as i32
+                && y < h as i32
+                && surf
+                    .cur
+                    .borrow()
+                    .input_region
+                    .as_ref()
+                    .map_or(true, |reg| reg.contains_point(x, y).is_some());
+            ok.then_some((surf, x, y))
+        }
+        for (toplevel_i, toplevel) in self.state.focus_stack.iter().enumerate().rev() {
+            let tl = toplevel.upgrade().unwrap();
+            let xdg = tl.xdg_surface.upgrade().unwrap();
+            let Some(geom) = xdg.get_window_geometry() else { continue };
+            let tlx = x - tl.x.get();
+            let tly = y - tl.y.get();
+            if !(tlx >= 0
+                && tly >= 0
+                && tlx < geom.width.get() as i32
+                && tly < geom.height.get() as i32)
+            {
+                continue;
+            }
+            if let Some((surf, sx, sy)) =
+                surface_at(tl.wl_surface.upgrade().unwrap(), tlx + geom.x, tly + geom.y)
+            {
+                return Some((toplevel_i, surf, sx as f32, sy as f32));
+            }
+        }
+        None
     }
 
     pub fn new(socket_path: PathBuf) -> Self {
@@ -167,16 +222,31 @@ impl Server {
                                 );
                             }
                         }
-                        frame.render_rect(
-                            0.5,
-                            0.5,
-                            0.5,
-                            1.0,
-                            self.state.seat.pointer_x.round() as i32,
-                            self.state.seat.pointer_y.round() as i32,
-                            10,
-                            10,
-                        );
+                        match &self.state.cursor {
+                            Some((surf, hx, hy)) => {
+                                if let Some((buf, _, _)) = surf.cur.borrow().buffer {
+                                    frame.render_buffer(
+                                        buf,
+                                        surf.cur.borrow().opaque_region.as_ref(),
+                                        1.0,
+                                        self.state.seat.pointer_x.round() as i32 - hx,
+                                        self.state.seat.pointer_y.round() as i32 - hy,
+                                    );
+                                }
+                            }
+                            None => {
+                                frame.render_rect(
+                                    0.5,
+                                    0.5,
+                                    0.5,
+                                    1.0,
+                                    self.state.seat.pointer_x.round() as i32,
+                                    self.state.seat.pointer_y.round() as i32,
+                                    10,
+                                    10,
+                                );
+                            }
+                        }
                     });
                     dbg!(t.elapsed());
                 }
@@ -195,7 +265,7 @@ impl Server {
                     } else {
                         if let Some(toplevel) = self.state.focus_stack.last() {
                             let toplevel = toplevel.upgrade().unwrap();
-                            self.state.seat.focus_surface(Some(
+                            self.state.seat.kbd_focus_surface(Some(
                                 toplevel.wl_surface.upgrade().unwrap().wl.clone(),
                             ));
                         }
@@ -205,9 +275,9 @@ impl Server {
                 BackendEvent::KeyReleased(_id, key) => {
                     if let Some(toplevel) = self.state.focus_stack.last() {
                         let toplevel = toplevel.upgrade().unwrap();
-                        self.state
-                            .seat
-                            .focus_surface(Some(toplevel.wl_surface.upgrade().unwrap().wl.clone()));
+                        self.state.seat.kbd_focus_surface(Some(
+                            toplevel.wl_surface.upgrade().unwrap().wl.clone(),
+                        ));
                     }
                     self.state.seat.update_key(key, false);
                 }
@@ -215,45 +285,44 @@ impl Server {
                 BackendEvent::PointerMotion(_id, x, y) => {
                     self.state.seat.pointer_x = x;
                     self.state.seat.pointer_y = y;
-                    if let Some((toplevel, px, py, tx, ty)) = self.state.moving_toplevel.clone() {
+                    if let Some((toplevel, px, py, tx, ty)) = &self.state.moving_toplevel {
                         let toplevel = toplevel.upgrade().unwrap();
                         toplevel.x.set(tx + (x - px).round() as i32);
                         toplevel.y.set(ty + (y - py).round() as i32);
+                    } else if let Some((_i, surf, sx, sy)) =
+                        self.surface_at(x.round() as i32, y.round() as i32)
+                    {
+                        self.state
+                            .seat
+                            .ptr_forward_pointer(Some((surf.wl.clone(), sx, sy)));
+                    } else {
+                        self.state.seat.ptr_forward_pointer(None);
+                        self.state.cursor = None;
                     }
                 }
-                BackendEvent::PointerBtnPress(_id, _btn) => {
+                BackendEvent::PointerBtnPress(_id, btn) => {
                     let x = self.state.seat.pointer_x.round() as i32;
                     let y = self.state.seat.pointer_y.round() as i32;
-                    if !self.state.seat.get_mods().alt {
-                        continue;
-                    }
-                    for (toplevel_i, toplevel) in
-                        self.state.focus_stack.iter_mut().enumerate().rev()
-                    {
-                        let tl = toplevel.upgrade().unwrap();
-                        let xdg = tl.xdg_surface.upgrade().unwrap();
-                        if let Some(geom) = xdg.get_window_geometry() {
-                            if x >= tl.x.get()
-                                && y >= tl.y.get()
-                                && x <= tl.x.get() + geom.width.get() as i32
-                                && y <= tl.y.get() + geom.height.get() as i32
-                            {
-                                self.state.moving_toplevel = Some((
-                                    Rc::downgrade(&tl),
-                                    self.state.seat.pointer_x,
-                                    self.state.seat.pointer_y,
-                                    tl.x.get(),
-                                    tl.y.get(),
-                                ));
-                                let tl = self.state.focus_stack.remove(toplevel_i);
-                                self.state.focus_stack.push(tl);
-                                break;
-                            }
+                    if self.state.seat.get_mods().alt && btn == BTN_LEFT {
+                        if let Some(toplevel_i) = self.toplevel_at(x, y) {
+                            let toplevel = self.state.focus_stack[toplevel_i].upgrade().unwrap();
+                            self.state.moving_toplevel = Some((
+                                Rc::downgrade(&toplevel),
+                                self.state.seat.pointer_x,
+                                self.state.seat.pointer_y,
+                                toplevel.x.get(),
+                                toplevel.y.get(),
+                            ));
+                            let tl = self.state.focus_stack.remove(toplevel_i);
+                            self.state.focus_stack.push(tl);
                         }
+                    } else {
+                        self.state.seat.ptr_forward_btn(btn, true);
                     }
                 }
-                BackendEvent::PointerBtnRelease(_id, _btn) => {
+                BackendEvent::PointerBtnRelease(_id, btn) => {
                     self.state.moving_toplevel = None;
+                    self.state.seat.ptr_forward_btn(btn, false);
                 }
                 BackendEvent::PointerRemoved(_id) => (),
             }
@@ -376,6 +445,7 @@ fn print_client_surface_tree(client: &Client) {
                 for s in client.compositor.surfaces.values() {
                     let role = match &*s.role.borrow() {
                         globals::compositor::SurfaceRole::None => "no role",
+                        globals::compositor::SurfaceRole::Cursor => "cursor",
                         globals::compositor::SurfaceRole::Subsurface(_) => continue,
                         globals::compositor::SurfaceRole::Xdg(_) => "xdg",
                     };

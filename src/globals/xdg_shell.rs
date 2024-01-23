@@ -25,6 +25,7 @@ pub struct XdgSurfaceRole {
 
 impl XdgSurfaceRole {
     pub fn get_window_geometry(&self) -> Option<WindowGeometry> {
+        // TODO: check if surface is mapped
         self.effective_window_geometry.get()
     }
 
@@ -111,9 +112,9 @@ impl XdgToplevelRole {
         state
             .focus_stack
             .retain(|s| s.upgrade().unwrap().wl != self.wl);
-        if state.seat.focused_surface.as_ref() == Some(&self.wl_surface.upgrade().unwrap().wl) {
-            state.seat.focus_surface(None);
-        }
+        state
+            .seat
+            .unfocus_surface(&self.wl_surface.upgrade().unwrap().wl);
     }
 }
 
@@ -157,7 +158,7 @@ impl IsGlobal for XdgWmBase {
                         .surfaces
                         .get(&args.surface)
                         .ok_or_else(|| io::Error::other("invalid surface id"))?;
-                    if !surface.role.borrow().is_none() {
+                    if surface.has_role() {
                         return Err(io::Error::other("surface already has a role"));
                     }
                     args.id.set_callback(xdg_surface_cb);

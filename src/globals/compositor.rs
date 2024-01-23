@@ -169,6 +169,10 @@ impl Surface {
         }
     }
 
+    pub fn has_role(&self) -> bool {
+        !matches!(&*self.role.borrow(), SurfaceRole::None)
+    }
+
     pub fn get_subsurface(&self) -> Option<Rc<SubsurfaceRole>> {
         match &*self.role.borrow() {
             SurfaceRole::Subsurface(sub) => Some(sub.clone()),
@@ -197,14 +201,9 @@ impl Surface {
 
 pub enum SurfaceRole {
     None,
+    Cursor,
     Subsurface(Rc<SubsurfaceRole>),
     Xdg(Rc<xdg_shell::XdgSurfaceRole>),
-}
-
-impl SurfaceRole {
-    pub fn is_none(&self) -> bool {
-        matches!(self, Self::None)
-    }
 }
 
 pub struct SubsurfaceRole {
@@ -254,7 +253,7 @@ impl IsGlobal for WlSubcompositor {
                         .surfaces
                         .get_many_mut([&args.surface, &args.parent])
                         .ok_or_else(|| io::Error::other("invalid id in get_subsurface"))?;
-                    if !surface.role.borrow().is_none() {
+                    if surface.has_role() {
                         return Err(io::Error::other("surface already has a role"));
                     }
                     let subsurface = Rc::new(SubsurfaceRole {
@@ -302,7 +301,7 @@ fn wl_surface_cb(ctx: RequestCtx<WlSurface>) -> io::Result<()> {
     match ctx.request {
         Request::Destroy => {
             eprintln!("destroying {:?}", ctx.proxy);
-            if !surface.role.borrow().is_none() {
+            if surface.has_role() {
                 return Err(io::Error::other("destroying wl_surface before role object"));
             }
         }
