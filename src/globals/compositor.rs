@@ -304,7 +304,10 @@ fn wl_surface_cb(ctx: RequestCtx<WlSurface>) -> io::Result<()> {
     match ctx.request {
         Request::Destroy => {
             eprintln!("destroying {:?}", ctx.proxy);
-            if surface.has_role() {
+            if !matches!(
+                &*surface.role.borrow(),
+                SurfaceRole::None | SurfaceRole::Cursor,
+            ) {
                 return Err(io::Error::other("destroying wl_surface before role object"));
             }
         }

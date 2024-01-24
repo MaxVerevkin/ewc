@@ -11,6 +11,7 @@ use super::xdg_shell::XdgToplevelRole;
 use super::{Global, IsGlobal};
 use crate::client::RequestCtx;
 use crate::focus_stack::FocusStack;
+use crate::globals::compositor::SurfaceRole;
 use crate::protocol::*;
 use crate::wayland_core::{Fixed, Proxy};
 use crate::Client;
@@ -209,8 +210,12 @@ impl Seat {
             wl_pointer::ButtonState::Released
         };
         if let Some(surface) = self.ptr_get_focused_surface() {
-            for ptr in surface.conn().seat.pointers.borrow().iter() {
-                ptr.wl.button(1, 0, btn, state);
+            if surface.is_alive() {
+                for ptr in surface.conn().seat.pointers.borrow().iter() {
+                    ptr.wl.button(1, 0, btn, state);
+                }
+            } else {
+                self.ptr_state = PtrState::None;
             }
         }
     }
@@ -414,8 +419,10 @@ fn wl_pointer_cb(ctx: RequestCtx<WlPointer>) -> io::Result<()> {
             None => ctx.state.cursor = None,
             Some(surf) => {
                 let surface = ctx.client.compositor.surfaces.get(&surf).unwrap();
-                if surface.has_role() {
-                    return Err(io::Error::other("surface already has a role"));
+                match &mut *surface.role.borrow_mut() {
+                    x @ SurfaceRole::None => *x = SurfaceRole::Cursor,
+                    SurfaceRole::Cursor => (),
+                    _ => return Err(io::Error::other("surface already has a role")),
                 }
                 ctx.state.cursor = Some((surface.clone(), args.hotspot_x, args.hotspot_y));
             }
