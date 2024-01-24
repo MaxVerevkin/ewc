@@ -57,18 +57,11 @@ impl FocusStack {
             let tl = toplevel.upgrade().unwrap();
             let xdg = tl.xdg_surface.upgrade().unwrap();
             let Some(geom) = xdg.get_window_geometry() else { continue };
-            let tlx = x - tl.x.get();
-            let tly = y - tl.y.get();
-            if !(tlx >= 0
-                && tly >= 0
-                && tlx < geom.width.get() as i32
-                && tly < geom.height.get() as i32)
-            {
-                continue;
-            }
-            if let Some((surf, sx, sy)) =
-                surface_at(tl.wl_surface.upgrade().unwrap(), tlx + geom.x, tly + geom.y)
-            {
+            if let Some((surf, sx, sy)) = surface_at(
+                tl.wl_surface.upgrade().unwrap(),
+                x - tl.x.get() + geom.x,
+                y - tl.y.get() + geom.y,
+            ) {
                 return Some((toplevel_i, surf, sx as f32, sy as f32));
             }
         }
