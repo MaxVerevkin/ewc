@@ -138,39 +138,32 @@ impl XdgToplevelRole {
         width: NonZeroU32,
         height: NonZeroU32,
     ) {
-        match self.map_state.get() {
-            MapState::Mapped => {
-                let serial = client.compositor.next_configure_serial.0;
-                client.compositor.next_configure_serial += 1;
+        if self.map_state.get() == MapState::Mapped {
+            let serial = client.compositor.next_configure_serial.0;
+            client.compositor.next_configure_serial += 1;
 
-                match self.resizing.get() {
-                    None => {
-                        let geom = self
-                            .xdg_surface
-                            .upgrade()
-                            .unwrap()
-                            .get_window_geometry()
-                            .unwrap();
-                        let (nx, ny) = geom.get_opposite_edge_point(edge);
-                        self.resizing.set(Some((
-                            edge,
-                            nx + self.x.get(),
-                            ny + self.y.get(),
-                            serial,
-                        )));
-                    }
-                    Some((oe, onx, ony, _oserial)) => {
-                        assert_eq!(oe, edge);
-                        self.resizing.set(Some((edge, onx, ony, serial)));
-                    }
+            match self.resizing.get() {
+                None => {
+                    let geom = self
+                        .xdg_surface
+                        .upgrade()
+                        .unwrap()
+                        .get_window_geometry()
+                        .unwrap();
+                    let (nx, ny) = geom.get_opposite_edge_point(edge);
+                    self.resizing
+                        .set(Some((edge, nx + self.x.get(), ny + self.y.get(), serial)));
                 }
-
-                self.wl
-                    .configure(width.get() as i32, height.get() as i32, Vec::new());
-                self.xdg_surface.upgrade().unwrap().wl.configure(serial);
-                self.pending_configure.set(Some(serial));
+                Some((oe, onx, ony, _oserial)) => {
+                    assert_eq!(oe, edge);
+                    self.resizing.set(Some((edge, onx, ony, serial)));
+                }
             }
-            _ => (),
+
+            self.wl
+                .configure(width.get() as i32, height.get() as i32, Vec::new());
+            self.xdg_surface.upgrade().unwrap().wl.configure(serial);
+            self.pending_configure.set(Some(serial));
         }
     }
 }

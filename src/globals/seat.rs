@@ -187,7 +187,7 @@ impl Seat {
         if let Some(old_surface) = self.ptr_get_focused_surface() {
             if old_surface.is_alive() {
                 for ptr in old_surface.conn().seat.pointers.borrow().iter() {
-                    ptr.wl.leave(1, &old_surface);
+                    ptr.wl.leave(1, old_surface);
                 }
             }
         }

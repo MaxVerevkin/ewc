@@ -341,11 +341,14 @@ fn main() {
     socket_path.push(format!("wayland-{socket_number}"));
     println!("Running on {}", socket_path.display());
 
-    let mut server = Server::new(socket_path);
+    let mut server = Server::new(socket_path.clone());
     server
         .event_loop
         .add_fd(quit_read.as_raw_fd(), event_loop::Event::Quit)
         .unwrap();
+
+    std::env::set_var("WAYLAND_DISPLAY", &socket_path);
+    std::process::Command::new("foot").spawn().unwrap();
 
     loop {
         match server.event_loop.poll().unwrap() {
