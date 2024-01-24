@@ -109,9 +109,7 @@ pub struct XdgToplevelRole {
 impl XdgToplevelRole {
     fn unmap(&self, state: &mut State) {
         self.map_state.set(MapState::Unmapped);
-        state
-            .focus_stack
-            .retain(|s| s.upgrade().unwrap().wl != self.wl);
+        state.focus_stack.remove(self);
         state
             .seat
             .unfocus_surface(&self.wl_surface.upgrade().unwrap().wl);
@@ -284,7 +282,9 @@ fn xdg_toplevel_cb(ctx: RequestCtx<XdgToplevel>) -> io::Result<()> {
             toplevel.pending.borrow_mut().app_id = Some(app_id);
         }
         Request::ShowWindowMenu(_) => todo!(),
-        Request::Move(_) => todo!(),
+        Request::Move(_args) => {
+            ctx.state.seat.ptr_start_move(&mut ctx.state.focus_stack);
+        }
         Request::Resize(_) => todo!(),
         Request::SetMaxSize(args) => {
             dbg!(args);
@@ -369,14 +369,13 @@ pub fn surface_commit(
                     }
                     let (x, y) = state
                         .focus_stack
-                        .last()
-                        .map(|t| t.upgrade().unwrap())
+                        .top()
                         .map(|t| (t.x.get() + 50, t.y.get() + 50))
                         .unwrap_or((20, 20));
                     toplevel.map_state.set(MapState::Mapped);
                     toplevel.x.set(x);
                     toplevel.y.set(y);
-                    state.focus_stack.push(Rc::downgrade(toplevel));
+                    state.focus_stack.push(toplevel);
                 }
                 MapState::Mapped => {
                     if surface.cur.borrow().buffer.is_none() {

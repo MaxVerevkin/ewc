@@ -1,16 +1,16 @@
 use std::cell::RefCell;
-use std::ffi::CStr;
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::fs::File;
-use std::io;
-use std::io::Write;
-use std::os::fd::AsFd;
-use std::os::fd::FromRawFd;
+use std::io::{self, Write};
+use std::os::fd::{AsFd, FromRawFd};
+use std::rc::{Rc, Weak};
 
 use xkbcommon::xkb;
 
+use super::xdg_shell::XdgToplevelRole;
 use super::{Global, IsGlobal};
 use crate::client::RequestCtx;
+use crate::focus_stack::FocusStack;
 use crate::protocol::*;
 use crate::wayland_core::{Fixed, Proxy};
 use crate::Client;
@@ -30,13 +30,21 @@ pub struct Seat {
     keymap_file_size: u32,
 
     kbd_focused_surface: Option<WlSurface>,
-    ptr_focused_surface: Option<(WlSurface, f32, f32)>,
+    ptr_focused_surface: Option<SurfacePtrState>,
 
     mods: ModsState,
     pub xkb_state: xkb::State,
 
     pub pointer_x: f32,
     pub pointer_y: f32,
+
+    pub moving_toplevel: Option<(Weak<XdgToplevelRole>, f32, f32, i32, i32)>,
+}
+
+struct SurfacePtrState {
+    surface: WlSurface,
+    x: f32,
+    y: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,6 +132,8 @@ impl Seat {
 
             pointer_x: 0.0,
             pointer_y: 0.0,
+
+            moving_toplevel: None,
         }
     }
 
@@ -150,8 +160,8 @@ impl Seat {
 
     pub fn ptr_forward_pointer(&mut self, surface: Option<(WlSurface, f32, f32)>) {
         if let Some((surface, x, y)) = &surface {
-            if let Some((focused, _, _)) = &self.ptr_focused_surface {
-                if surface == focused {
+            if let Some(focused) = &self.ptr_focused_surface {
+                if *surface == focused.surface {
                     for ptr in surface.conn().seat.pointers.borrow().iter() {
                         ptr.wl.motion(0, Fixed::from(*x), Fixed::from(*y));
                     }
@@ -160,17 +170,17 @@ impl Seat {
             }
         }
 
-        if let Some((old_surf, _, _)) = &self.ptr_focused_surface {
-            if old_surf.is_alive() {
-                for ptr in old_surf.conn().seat.pointers.borrow().iter() {
-                    ptr.wl.leave(1, old_surf);
+        if let Some(old_focused) = &self.ptr_focused_surface {
+            if old_focused.surface.is_alive() {
+                for ptr in old_focused.surface.conn().seat.pointers.borrow().iter() {
+                    ptr.wl.leave(1, &old_focused.surface);
                 }
             }
         }
 
-        self.ptr_focused_surface = surface;
-        if let Some((new_surf, _x, _y)) = &self.ptr_focused_surface {
-            for ptr in new_surf.conn().seat.pointers.borrow().iter() {
+        self.ptr_focused_surface = surface.map(|(surface, x, y)| SurfacePtrState { surface, x, y });
+        if let Some(new_focused) = &self.ptr_focused_surface {
+            for ptr in new_focused.surface.conn().seat.pointers.borrow().iter() {
                 self.ptr_enter(&ptr.wl);
             }
         }
@@ -182,10 +192,25 @@ impl Seat {
         } else {
             wl_pointer::ButtonState::Released
         };
-        if let Some((new_surf, _x, _y)) = &self.ptr_focused_surface {
-            for ptr in new_surf.conn().seat.pointers.borrow().iter() {
+        if let Some(focused) = &self.ptr_focused_surface {
+            for ptr in focused.surface.conn().seat.pointers.borrow().iter() {
                 ptr.wl.button(1, 0, btn, state);
             }
+        }
+    }
+
+    pub fn ptr_start_move(&mut self, focus_stack: &mut FocusStack) {
+        if let Some(toplevel_i) = focus_stack.toplevel_at(self.pointer_x, self.pointer_y) {
+            self.ptr_forward_pointer(None);
+            let toplevel = focus_stack.get_i(toplevel_i).unwrap();
+            self.moving_toplevel = Some((
+                Rc::downgrade(&toplevel),
+                self.pointer_x,
+                self.pointer_y,
+                toplevel.x.get(),
+                toplevel.y.get(),
+            ));
+            focus_stack.focus_i(toplevel_i);
         }
     }
 
@@ -197,8 +222,13 @@ impl Seat {
     }
 
     fn ptr_enter(&self, wl_pointer: &WlPointer) {
-        if let Some((surf, x, y)) = &self.ptr_focused_surface {
-            wl_pointer.enter(1, surf, Fixed::from(*x), Fixed::from(*y));
+        if let Some(focused) = &self.ptr_focused_surface {
+            wl_pointer.enter(
+                1,
+                &focused.surface,
+                Fixed::from(focused.x),
+                Fixed::from(focused.y),
+            );
         }
     }
 
@@ -209,7 +239,7 @@ impl Seat {
         if self
             .ptr_focused_surface
             .as_ref()
-            .is_some_and(|x| x.0 == *wl_surface)
+            .is_some_and(|x| x.surface == *wl_surface)
         {
             self.ptr_forward_pointer(None);
         }
@@ -279,8 +309,8 @@ impl IsGlobal for WlSeat {
             match ctx.request {
                 Request::GetPointer(wl_pointer) => {
                     wl_pointer.set_callback(wl_pointer_cb);
-                    if let Some((surf, _x, _y)) = &ctx.state.seat.ptr_focused_surface {
-                        if surf.client_id() == ctx.client.conn.client_id() {
+                    if let Some(focused) = &ctx.state.seat.ptr_focused_surface {
+                        if focused.surface.client_id() == ctx.client.conn.client_id() {
                             ctx.state.seat.ptr_enter(&wl_pointer);
                         }
                     }
