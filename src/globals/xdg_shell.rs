@@ -7,6 +7,7 @@ use std::rc::{Rc, Weak};
 use super::compositor::{Surface, SurfaceRole};
 use super::IsGlobal;
 use crate::client::RequestCtx;
+use crate::protocol::xdg_toplevel::ResizeEdge;
 use crate::protocol::*;
 use crate::wayland_core::Proxy;
 use crate::{Client, State};
@@ -48,6 +49,20 @@ pub struct WindowGeometry {
     pub y: i32,
     pub width: NonZeroU32,
     pub height: NonZeroU32,
+}
+
+impl WindowGeometry {
+    pub fn get_opposite_edge_point(&self, edge: ResizeEdge) -> (i32, i32) {
+        let mut nx = 0;
+        let mut ny = 0;
+        if edge as u32 & ResizeEdge::Top as u32 != 0 {
+            ny = self.height.get() as i32;
+        }
+        if edge as u32 & ResizeEdge::Left as u32 != 0 {
+            nx = self.width.get() as i32;
+        }
+        (nx, ny)
+    }
 }
 
 impl TryFrom<pixman::Box32> for WindowGeometry {
@@ -98,6 +113,7 @@ pub struct XdgToplevelRole {
 
     pub x: Cell<i32>,
     pub y: Cell<i32>,
+    resizing: Cell<Option<(ResizeEdge, i32, i32, u32)>>,
 
     pub cur: RefCell<XdgToplevelState>,
     pub pending: RefCell<XdgToplevelState>,
@@ -113,6 +129,49 @@ impl XdgToplevelRole {
         state
             .seat
             .unfocus_surface(&self.wl_surface.upgrade().unwrap().wl);
+    }
+
+    pub fn request_size(
+        &self,
+        client: &mut Client,
+        edge: ResizeEdge,
+        width: NonZeroU32,
+        height: NonZeroU32,
+    ) {
+        match self.map_state.get() {
+            MapState::Mapped => {
+                let serial = client.compositor.next_configure_serial.0;
+                client.compositor.next_configure_serial += 1;
+
+                match self.resizing.get() {
+                    None => {
+                        let geom = self
+                            .xdg_surface
+                            .upgrade()
+                            .unwrap()
+                            .get_window_geometry()
+                            .unwrap();
+                        let (nx, ny) = geom.get_opposite_edge_point(edge);
+                        self.resizing.set(Some((
+                            edge,
+                            nx + self.x.get(),
+                            ny + self.y.get(),
+                            serial,
+                        )));
+                    }
+                    Some((oe, onx, ony, _oserial)) => {
+                        assert_eq!(oe, edge);
+                        self.resizing.set(Some((edge, onx, ony, serial)));
+                    }
+                }
+
+                self.wl
+                    .configure(width.get() as i32, height.get() as i32, Vec::new());
+                self.xdg_surface.upgrade().unwrap().wl.configure(serial);
+                self.pending_configure.set(Some(serial));
+            }
+            _ => (),
+        }
     }
 }
 
@@ -215,6 +274,7 @@ fn xdg_surface_cb(ctx: RequestCtx<XdgSurface>) -> io::Result<()> {
 
                 x: Cell::new(0),
                 y: Cell::new(0),
+                resizing: Cell::new(None),
 
                 cur: RefCell::new(XdgToplevelState::default()),
                 pending: RefCell::new(XdgToplevelState::default()),
@@ -283,9 +343,31 @@ fn xdg_toplevel_cb(ctx: RequestCtx<XdgToplevel>) -> io::Result<()> {
         }
         Request::ShowWindowMenu(_) => todo!(),
         Request::Move(_args) => {
-            ctx.state.seat.ptr_start_move(&mut ctx.state.focus_stack);
+            let toplevel_i = ctx
+                .state
+                .focus_stack
+                .inner()
+                .iter()
+                .position(|x| x.upgrade().unwrap().wl == ctx.proxy)
+                .unwrap();
+            ctx.state
+                .seat
+                .ptr_start_move(&mut ctx.state.focus_stack, Some(toplevel_i));
         }
-        Request::Resize(_) => todo!(),
+        Request::Resize(args) => {
+            let toplevel_i = ctx
+                .state
+                .focus_stack
+                .inner()
+                .iter()
+                .position(|x| x.upgrade().unwrap().wl == ctx.proxy)
+                .unwrap();
+            ctx.state.seat.ptr_start_resize(
+                &mut ctx.state.focus_stack,
+                args.edges,
+                Some(toplevel_i),
+            );
+        }
         Request::SetMaxSize(args) => {
             dbg!(args);
             eprintln!("TODO: set max size");
@@ -355,7 +437,7 @@ pub fn surface_commit(
                     }
                     let serial = client.compositor.next_configure_serial.0;
                     client.compositor.next_configure_serial += 1;
-                    toplevel.wl.configure(1000, 800, Vec::new());
+                    toplevel.wl.configure(400, 200, Vec::new());
                     xdg_surface.wl.configure(serial);
                     toplevel.map_state.set(MapState::WaitingFirstBuffer);
                     toplevel.pending_configure.set(Some(serial));
@@ -380,6 +462,18 @@ pub fn surface_commit(
                 MapState::Mapped => {
                     if surface.cur.borrow().buffer.is_none() {
                         toplevel.unmap(state);
+                    } else if let Some((edge, x, y, serial)) = toplevel.resizing.get() {
+                        let geom = xdg_surface.get_window_geometry().unwrap();
+                        let (nx, ny) = geom.get_opposite_edge_point(edge);
+                        toplevel.x.set(x - nx);
+                        toplevel.y.set(y - ny);
+                        if xdg_surface
+                            .last_acked_configure
+                            .get()
+                            .is_some_and(|acked| acked.wrapping_sub(serial) as i32 >= 0)
+                        {
+                            toplevel.resizing.set(None);
+                        }
                     }
                 }
             }

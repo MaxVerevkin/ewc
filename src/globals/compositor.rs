@@ -473,6 +473,14 @@ fn wl_subsurface_cb(ctx: RequestCtx<WlSubsurface>) -> io::Result<()> {
                 .find(|n| n.surface.wl == subsurface.surface.upgrade().unwrap().wl)
                 .unwrap()
                 .position = (args.x, args.y);
+            subsurface
+                .parent
+                .upgrade()
+                .unwrap()
+                .pending
+                .borrow_mut()
+                .mask
+                .set(CommittedMaskBit::Subsurfaces)
         }
         Request::PlaceAbove(_) => todo!(),
         Request::PlaceBelow(_) => todo!(),

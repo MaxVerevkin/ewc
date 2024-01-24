@@ -17,7 +17,7 @@ use crate::Client;
 
 // pub const BTN_MOUSE: u32 = 0x110;
 pub const BTN_LEFT: u32 = 0x110;
-// pub const BTN_RIGHT: u32 = 0x111;
+pub const BTN_RIGHT: u32 = 0x111;
 // pub const BTN_MIDDLE: u32 = 0x112;
 // pub const BTN_SIDE: u32 = 0x113;
 // pub const BTN_EXTRA: u32 = 0x114;
@@ -30,21 +30,37 @@ pub struct Seat {
     keymap_file_size: u32,
 
     kbd_focused_surface: Option<WlSurface>,
-    ptr_focused_surface: Option<SurfacePtrState>,
+    pub ptr_state: PtrState,
 
     mods: ModsState,
     pub xkb_state: xkb::State,
 
     pub pointer_x: f32,
     pub pointer_y: f32,
-
-    pub moving_toplevel: Option<(Weak<XdgToplevelRole>, f32, f32, i32, i32)>,
 }
 
-struct SurfacePtrState {
-    surface: WlSurface,
-    x: f32,
-    y: f32,
+pub enum PtrState {
+    None,
+    Focused {
+        surface: WlSurface,
+        x: f32,
+        y: f32,
+    },
+    Moving {
+        toplevel: Weak<XdgToplevelRole>,
+        ptr_start_x: f32,
+        ptr_start_y: f32,
+        toplevel_start_x: i32,
+        toplevel_start_y: i32,
+    },
+    Resizing {
+        toplevel: Weak<XdgToplevelRole>,
+        edge: xdg_toplevel::ResizeEdge,
+        ptr_start_x: f32,
+        ptr_start_y: f32,
+        toplevel_start_width: u32,
+        toplevel_start_height: u32,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,15 +141,13 @@ impl Seat {
             keymap_file_size,
 
             kbd_focused_surface: None,
-            ptr_focused_surface: None,
+            ptr_state: PtrState::None,
 
             mods: ModsState::get(&xkb_state),
             xkb_state,
 
             pointer_x: 0.0,
             pointer_y: 0.0,
-
-            moving_toplevel: None,
         }
     }
 
@@ -160,8 +174,8 @@ impl Seat {
 
     pub fn ptr_forward_pointer(&mut self, surface: Option<(WlSurface, f32, f32)>) {
         if let Some((surface, x, y)) = &surface {
-            if let Some(focused) = &self.ptr_focused_surface {
-                if *surface == focused.surface {
+            if let Some(fsurf) = self.ptr_get_focused_surface() {
+                if surface == fsurf {
                     for ptr in surface.conn().seat.pointers.borrow().iter() {
                         ptr.wl.motion(0, Fixed::from(*x), Fixed::from(*y));
                     }
@@ -170,17 +184,19 @@ impl Seat {
             }
         }
 
-        if let Some(old_focused) = &self.ptr_focused_surface {
-            if old_focused.surface.is_alive() {
-                for ptr in old_focused.surface.conn().seat.pointers.borrow().iter() {
-                    ptr.wl.leave(1, &old_focused.surface);
+        if let Some(old_surface) = self.ptr_get_focused_surface() {
+            if old_surface.is_alive() {
+                for ptr in old_surface.conn().seat.pointers.borrow().iter() {
+                    ptr.wl.leave(1, &old_surface);
                 }
             }
         }
 
-        self.ptr_focused_surface = surface.map(|(surface, x, y)| SurfacePtrState { surface, x, y });
-        if let Some(new_focused) = &self.ptr_focused_surface {
-            for ptr in new_focused.surface.conn().seat.pointers.borrow().iter() {
+        self.ptr_state = surface
+            .map(|(surface, x, y)| PtrState::Focused { surface, x, y })
+            .unwrap_or(PtrState::None);
+        if let Some(new_surface) = self.ptr_get_focused_surface() {
+            for ptr in new_surface.conn().seat.pointers.borrow().iter() {
                 self.ptr_enter(&ptr.wl);
             }
         }
@@ -192,26 +208,59 @@ impl Seat {
         } else {
             wl_pointer::ButtonState::Released
         };
-        if let Some(focused) = &self.ptr_focused_surface {
-            for ptr in focused.surface.conn().seat.pointers.borrow().iter() {
+        if let Some(surface) = self.ptr_get_focused_surface() {
+            for ptr in surface.conn().seat.pointers.borrow().iter() {
                 ptr.wl.button(1, 0, btn, state);
             }
         }
     }
 
-    pub fn ptr_start_move(&mut self, focus_stack: &mut FocusStack) {
-        if let Some(toplevel_i) = focus_stack.toplevel_at(self.pointer_x, self.pointer_y) {
-            self.ptr_forward_pointer(None);
-            let toplevel = focus_stack.get_i(toplevel_i).unwrap();
-            self.moving_toplevel = Some((
-                Rc::downgrade(&toplevel),
-                self.pointer_x,
-                self.pointer_y,
-                toplevel.x.get(),
-                toplevel.y.get(),
-            ));
-            focus_stack.focus_i(toplevel_i);
-        }
+    pub fn ptr_start_move(&mut self, focus_stack: &mut FocusStack, toplevel_i: Option<usize>) {
+        let Some(toplevel_i) =
+            toplevel_i.or_else(|| focus_stack.toplevel_at(self.pointer_x, self.pointer_y))
+        else {
+            return;
+        };
+        self.ptr_forward_pointer(None);
+        let toplevel = focus_stack.get_i(toplevel_i).unwrap();
+        self.ptr_state = PtrState::Moving {
+            toplevel: Rc::downgrade(&toplevel),
+            ptr_start_x: self.pointer_x,
+            ptr_start_y: self.pointer_y,
+            toplevel_start_x: toplevel.x.get(),
+            toplevel_start_y: toplevel.y.get(),
+        };
+        focus_stack.focus_i(toplevel_i);
+    }
+
+    pub fn ptr_start_resize(
+        &mut self,
+        focus_stack: &mut FocusStack,
+        edge: xdg_toplevel::ResizeEdge,
+        toplevel_i: Option<usize>,
+    ) {
+        let Some(toplevel_i) =
+            toplevel_i.or_else(|| focus_stack.toplevel_at(self.pointer_x, self.pointer_y))
+        else {
+            return;
+        };
+        self.ptr_forward_pointer(None);
+        let toplevel = focus_stack.get_i(toplevel_i).unwrap();
+        let start_geom = toplevel
+            .xdg_surface
+            .upgrade()
+            .unwrap()
+            .get_window_geometry()
+            .unwrap();
+        self.ptr_state = PtrState::Resizing {
+            toplevel: Rc::downgrade(&toplevel),
+            edge,
+            ptr_start_x: self.pointer_x,
+            ptr_start_y: self.pointer_y,
+            toplevel_start_width: start_geom.width.get(),
+            toplevel_start_height: start_geom.height.get(),
+        };
+        focus_stack.focus_i(toplevel_i);
     }
 
     fn kbd_enter(&self, wl_keyboard: &WlKeyboard) {
@@ -222,13 +271,15 @@ impl Seat {
     }
 
     fn ptr_enter(&self, wl_pointer: &WlPointer) {
-        if let Some(focused) = &self.ptr_focused_surface {
-            wl_pointer.enter(
-                1,
-                &focused.surface,
-                Fixed::from(focused.x),
-                Fixed::from(focused.y),
-            );
+        if let PtrState::Focused { surface, x, y } = &self.ptr_state {
+            wl_pointer.enter(1, surface, Fixed::from(*x), Fixed::from(*y));
+        }
+    }
+
+    fn ptr_get_focused_surface(&self) -> Option<&WlSurface> {
+        match &self.ptr_state {
+            PtrState::Focused { surface, .. } => Some(surface),
+            _ => None,
         }
     }
 
@@ -236,11 +287,7 @@ impl Seat {
         if self.kbd_focused_surface.as_ref() == Some(wl_surface) {
             self.kbd_focus_surface(None);
         }
-        if self
-            .ptr_focused_surface
-            .as_ref()
-            .is_some_and(|x| x.surface == *wl_surface)
-        {
+        if self.ptr_get_focused_surface() == Some(wl_surface) {
             self.ptr_forward_pointer(None);
         }
     }
@@ -309,8 +356,8 @@ impl IsGlobal for WlSeat {
             match ctx.request {
                 Request::GetPointer(wl_pointer) => {
                     wl_pointer.set_callback(wl_pointer_cb);
-                    if let Some(focused) = &ctx.state.seat.ptr_focused_surface {
-                        if focused.surface.client_id() == ctx.client.conn.client_id() {
+                    if let Some(focused) = ctx.state.seat.ptr_get_focused_surface() {
+                        if focused.client_id() == ctx.client.conn.client_id() {
                             ctx.state.seat.ptr_enter(&wl_pointer);
                         }
                     }

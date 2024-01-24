@@ -207,13 +207,13 @@ impl Backend for BackendImp {
     fn buffer_lock(&mut self, buffer_id: BufferId) {
         let buf = self.shm_buffers.get_mut(&buffer_id).unwrap();
         buf.locks += 1;
-        eprintln!("locking {buffer_id:?} (locks = {})", buf.locks);
+        // eprintln!("locking {buffer_id:?} (locks = {})", buf.locks);
     }
 
     fn buffer_unlock(&mut self, buffer_id: BufferId) {
         let buf = self.shm_buffers.get_mut(&buffer_id).unwrap();
         buf.locks -= 1;
-        eprintln!("unlocking {buffer_id:?} (locks = {})", buf.locks);
+        // eprintln!("unlocking {buffer_id:?} (locks = {})", buf.locks);
         if buf.locks == 0 {
             if let Some(resource) = &buf.resource {
                 resource.release();

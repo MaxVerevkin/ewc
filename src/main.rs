@@ -5,6 +5,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::io;
+use std::num::NonZeroU32;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
@@ -25,8 +26,9 @@ use crate::client::{Client, ClientId};
 use crate::event_loop::EventLoop;
 use crate::focus_stack::FocusStack;
 use crate::globals::compositor::{Compositor, Surface};
-use crate::globals::seat::{Seat, BTN_LEFT};
+use crate::globals::seat::{PtrState, Seat, BTN_LEFT, BTN_RIGHT};
 use crate::globals::Global;
+use crate::protocol::xdg_toplevel::ResizeEdge;
 use crate::protocol::*;
 use crate::wayland_core::*;
 
@@ -128,7 +130,7 @@ impl Server {
             match event {
                 BackendEvent::ShutDown => return Err(io::Error::other("backend shutdown")),
                 BackendEvent::Frame => {
-                    let t = std::time::Instant::now();
+                    // let t = std::time::Instant::now();
                     self.state.backend.render_frame(&mut |frame| {
                         frame.clear(0.2, 0.1, 0.2);
                         for (toplevel_i, toplevel) in
@@ -177,7 +179,7 @@ impl Server {
                             }
                         }
                     });
-                    dbg!(t.elapsed());
+                    // dbg!(t.elapsed());
                 }
                 BackendEvent::NewKeyboard(_id) => (),
                 BackendEvent::KeyboardRemoved(_id) => (),
@@ -212,34 +214,94 @@ impl Server {
                 BackendEvent::PointerMotion(_id, x, y) => {
                     self.state.seat.pointer_x = x;
                     self.state.seat.pointer_y = y;
-                    if let Some((toplevel, px, py, tx, ty)) = &self.state.seat.moving_toplevel {
-                        let toplevel = toplevel.upgrade().unwrap();
-                        toplevel.x.set(tx + (x - px).round() as i32);
-                        toplevel.y.set(ty + (y - py).round() as i32);
-                    } else if let Some((_i, surf, sx, sy)) = self
-                        .state
-                        .focus_stack
-                        .surface_at(x.round() as i32, y.round() as i32)
-                    {
-                        self.state
-                            .seat
-                            .ptr_forward_pointer(Some((surf.wl.clone(), sx, sy)));
-                    } else {
-                        self.state.seat.ptr_forward_pointer(None);
-                        self.state.cursor = None;
+                    match &self.state.seat.ptr_state {
+                        PtrState::Moving {
+                            toplevel,
+                            ptr_start_x: px,
+                            ptr_start_y: py,
+                            toplevel_start_x: tx,
+                            toplevel_start_y: ty,
+                        } => {
+                            let toplevel = toplevel.upgrade().unwrap();
+                            toplevel.x.set(tx + (x - px).round() as i32);
+                            toplevel.y.set(ty + (y - py).round() as i32);
+                        }
+                        PtrState::Resizing {
+                            toplevel,
+                            edge,
+                            ptr_start_x: px,
+                            ptr_start_y: py,
+                            toplevel_start_width: sw,
+                            toplevel_start_height: sh,
+                        } => {
+                            let toplevel = toplevel.upgrade().unwrap();
+                            let client = self.clients.get_mut(&toplevel.wl.client_id()).unwrap();
+                            let mut dw = 0;
+                            let mut dh = 0;
+                            if *edge as u32 & ResizeEdge::Top as u32 != 0 {
+                                dh = (*py - y).round() as i32;
+                            }
+                            if *edge as u32 & ResizeEdge::Bottom as u32 != 0 {
+                                dh = (y - *py).round() as i32;
+                            }
+                            if *edge as u32 & ResizeEdge::Right as u32 != 0 {
+                                dw = (x - *px).round() as i32;
+                            }
+                            if *edge as u32 & ResizeEdge::Left as u32 != 0 {
+                                dw = (*px - x).round() as i32;
+                            }
+                            if dw != 0 || dh != 0 {
+                                toplevel.request_size(
+                                    client,
+                                    *edge,
+                                    NonZeroU32::new(sw.checked_add_signed(dw).unwrap_or(1))
+                                        .unwrap_or(NonZeroU32::MIN),
+                                    NonZeroU32::new(sh.checked_add_signed(dh).unwrap_or(1))
+                                        .unwrap_or(NonZeroU32::MIN),
+                                );
+                            }
+                        }
+                        _ => {
+                            if let Some((_i, surf, sx, sy)) = self
+                                .state
+                                .focus_stack
+                                .surface_at(x.round() as i32, y.round() as i32)
+                            {
+                                self.state.seat.ptr_forward_pointer(Some((
+                                    surf.wl.clone(),
+                                    sx,
+                                    sy,
+                                )));
+                            } else {
+                                self.state.seat.ptr_forward_pointer(None);
+                                self.state.cursor = None;
+                            }
+                        }
                     }
                 }
                 BackendEvent::PointerBtnPress(_id, btn) => {
                     if self.state.seat.get_mods().alt && btn == BTN_LEFT {
-                        self.state.seat.ptr_start_move(&mut self.state.focus_stack);
+                        self.state
+                            .seat
+                            .ptr_start_move(&mut self.state.focus_stack, None);
+                    } else if self.state.seat.get_mods().alt && btn == BTN_RIGHT {
+                        self.state.seat.ptr_start_resize(
+                            &mut self.state.focus_stack,
+                            xdg_toplevel::ResizeEdge::BottomRight,
+                            None,
+                        );
                     } else {
                         self.state.seat.ptr_forward_btn(btn, true);
                     }
                 }
-                BackendEvent::PointerBtnRelease(_id, btn) => {
-                    self.state.seat.moving_toplevel = None;
-                    self.state.seat.ptr_forward_btn(btn, false);
-                }
+                BackendEvent::PointerBtnRelease(_id, btn) => match &self.state.seat.ptr_state {
+                    PtrState::Moving { .. } | PtrState::Resizing { .. } => {
+                        self.state.seat.ptr_state = PtrState::None;
+                    }
+                    _ => {
+                        self.state.seat.ptr_forward_btn(btn, false);
+                    }
+                },
                 BackendEvent::PointerRemoved(_id) => (),
             }
         }
