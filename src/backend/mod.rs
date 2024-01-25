@@ -2,12 +2,16 @@ use std::io;
 use std::num::NonZeroU64;
 use std::os::fd::{OwnedFd, RawFd};
 
+pub mod drmkms;
 mod pixman_renderer;
 pub mod wayland;
 
 pub trait Backend {
-    fn get_fd(&self) -> RawFd;
-    fn poll(&mut self) -> io::Result<()>;
+    fn register_fds_with(
+        &self,
+        reg: &'_ mut dyn FnMut(RawFd, u32) -> io::Result<()>,
+    ) -> io::Result<()>;
+    fn poll(&mut self, data: u32) -> io::Result<()>;
     fn next_event(&mut self) -> Option<BackendEvent>;
     fn create_shm_pool(&mut self, fd: OwnedFd, size: usize) -> ShmPoolId;
     fn resize_shm_pool(&mut self, pool_id: ShmPoolId, new_size: usize);
@@ -65,7 +69,15 @@ pub enum BackendEvent {
 
     NewPointer(PointerId),
     PointerMotion(PointerId, f32, f32),
+    PointerMotionRelative(PointerId, f32, f32),
     PointerBtnPress(PointerId, u32),
     PointerBtnRelease(PointerId, u32),
     PointerRemoved(PointerId),
+}
+
+#[must_use]
+fn next_id(id: &mut NonZeroU64) -> NonZeroU64 {
+    let val = *id;
+    *id = id.checked_add(1).expect("id overflow");
+    val
 }

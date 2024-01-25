@@ -17,7 +17,7 @@ pub struct EventLoop {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Event {
     Socket,
-    Backend,
+    Backend(u32),
     Quit,
     Client(ClientId),
     MayGoIdle,

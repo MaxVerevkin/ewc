@@ -59,6 +59,18 @@ impl ToFlushSet {
     }
 }
 
+fn choose_backend() -> Box<dyn Backend> {
+    if let Some(b) = backend::wayland::new() {
+        return b;
+    }
+
+    if let Some(b) = backend::drmkms::new() {
+        return b;
+    }
+
+    panic!("No backend available")
+}
+
 impl Server {
     pub fn destroy_client(&mut self, client_id: ClientId) {
         eprintln!("destroying client");
@@ -69,15 +81,17 @@ impl Server {
     }
 
     pub fn new(socket_path: PathBuf) -> Self {
-        let backend = backend::wayland::new();
+        let backend = choose_backend();
         let socket = UnixListener::bind(&socket_path).unwrap();
         socket.set_nonblocking(true).unwrap();
         let mut event_loop = EventLoop::new().unwrap();
         event_loop
             .add_fd(socket.as_raw_fd(), event_loop::Event::Socket)
             .unwrap();
-        event_loop
-            .add_fd(backend.get_fd(), event_loop::Event::Backend)
+        backend
+            .register_fds_with(&mut |fd, data| {
+                event_loop.add_fd(fd, event_loop::Event::Backend(data))
+            })
             .unwrap();
         Self {
             socket,
@@ -124,8 +138,76 @@ fn render_surface(frame: &mut dyn Frame, surf: &Surface, alpha: f32, x: i32, y: 
 }
 
 impl Server {
-    fn poll_backend(&mut self) -> io::Result<()> {
-        self.state.backend.poll()?;
+    fn pointer_moved(&mut self) {
+        match &self.state.seat.ptr_state {
+            PtrState::Moving {
+                toplevel,
+                ptr_start_x: px,
+                ptr_start_y: py,
+                toplevel_start_x: tx,
+                toplevel_start_y: ty,
+            } => {
+                let toplevel = toplevel.upgrade().unwrap();
+                toplevel
+                    .x
+                    .set(tx + (self.state.seat.pointer_x - px).round() as i32);
+                toplevel
+                    .y
+                    .set(ty + (self.state.seat.pointer_y - py).round() as i32);
+            }
+            PtrState::Resizing {
+                toplevel,
+                edge,
+                ptr_start_x: px,
+                ptr_start_y: py,
+                toplevel_start_width: sw,
+                toplevel_start_height: sh,
+            } => {
+                let toplevel = toplevel.upgrade().unwrap();
+                let client = self.clients.get_mut(&toplevel.wl.client_id()).unwrap();
+                let mut dw = 0;
+                let mut dh = 0;
+                if *edge as u32 & ResizeEdge::Top as u32 != 0 {
+                    dh = (*py - self.state.seat.pointer_y).round() as i32;
+                }
+                if *edge as u32 & ResizeEdge::Bottom as u32 != 0 {
+                    dh = (self.state.seat.pointer_y - *py).round() as i32;
+                }
+                if *edge as u32 & ResizeEdge::Right as u32 != 0 {
+                    dw = (self.state.seat.pointer_x - *px).round() as i32;
+                }
+                if *edge as u32 & ResizeEdge::Left as u32 != 0 {
+                    dw = (*px - self.state.seat.pointer_x).round() as i32;
+                }
+                if dw != 0 || dh != 0 {
+                    toplevel.request_size(
+                        client,
+                        *edge,
+                        NonZeroU32::new(sw.checked_add_signed(dw).unwrap_or(1))
+                            .unwrap_or(NonZeroU32::MIN),
+                        NonZeroU32::new(sh.checked_add_signed(dh).unwrap_or(1))
+                            .unwrap_or(NonZeroU32::MIN),
+                    );
+                }
+            }
+            _ => {
+                if let Some((_i, surf, sx, sy)) = self.state.focus_stack.surface_at(
+                    self.state.seat.pointer_x.round() as i32,
+                    self.state.seat.pointer_y.round() as i32,
+                ) {
+                    self.state
+                        .seat
+                        .ptr_forward_pointer(Some((surf.wl.clone(), sx, sy)));
+                } else {
+                    self.state.seat.ptr_forward_pointer(None);
+                    self.state.cursor = None;
+                }
+            }
+        }
+    }
+
+    fn poll_backend(&mut self, backend_data: u32) -> io::Result<()> {
+        self.state.backend.poll(backend_data)?;
         while let Some(event) = self.state.backend.next_event() {
             match event {
                 BackendEvent::ShutDown => return Err(io::Error::other("backend shutdown")),
@@ -214,70 +296,12 @@ impl Server {
                 BackendEvent::PointerMotion(_id, x, y) => {
                     self.state.seat.pointer_x = x;
                     self.state.seat.pointer_y = y;
-                    match &self.state.seat.ptr_state {
-                        PtrState::Moving {
-                            toplevel,
-                            ptr_start_x: px,
-                            ptr_start_y: py,
-                            toplevel_start_x: tx,
-                            toplevel_start_y: ty,
-                        } => {
-                            let toplevel = toplevel.upgrade().unwrap();
-                            toplevel.x.set(tx + (x - px).round() as i32);
-                            toplevel.y.set(ty + (y - py).round() as i32);
-                        }
-                        PtrState::Resizing {
-                            toplevel,
-                            edge,
-                            ptr_start_x: px,
-                            ptr_start_y: py,
-                            toplevel_start_width: sw,
-                            toplevel_start_height: sh,
-                        } => {
-                            let toplevel = toplevel.upgrade().unwrap();
-                            let client = self.clients.get_mut(&toplevel.wl.client_id()).unwrap();
-                            let mut dw = 0;
-                            let mut dh = 0;
-                            if *edge as u32 & ResizeEdge::Top as u32 != 0 {
-                                dh = (*py - y).round() as i32;
-                            }
-                            if *edge as u32 & ResizeEdge::Bottom as u32 != 0 {
-                                dh = (y - *py).round() as i32;
-                            }
-                            if *edge as u32 & ResizeEdge::Right as u32 != 0 {
-                                dw = (x - *px).round() as i32;
-                            }
-                            if *edge as u32 & ResizeEdge::Left as u32 != 0 {
-                                dw = (*px - x).round() as i32;
-                            }
-                            if dw != 0 || dh != 0 {
-                                toplevel.request_size(
-                                    client,
-                                    *edge,
-                                    NonZeroU32::new(sw.checked_add_signed(dw).unwrap_or(1))
-                                        .unwrap_or(NonZeroU32::MIN),
-                                    NonZeroU32::new(sh.checked_add_signed(dh).unwrap_or(1))
-                                        .unwrap_or(NonZeroU32::MIN),
-                                );
-                            }
-                        }
-                        _ => {
-                            if let Some((_i, surf, sx, sy)) = self
-                                .state
-                                .focus_stack
-                                .surface_at(x.round() as i32, y.round() as i32)
-                            {
-                                self.state.seat.ptr_forward_pointer(Some((
-                                    surf.wl.clone(),
-                                    sx,
-                                    sy,
-                                )));
-                            } else {
-                                self.state.seat.ptr_forward_pointer(None);
-                                self.state.cursor = None;
-                            }
-                        }
-                    }
+                    self.pointer_moved();
+                }
+                BackendEvent::PointerMotionRelative(_id, dx, dy) => {
+                    self.state.seat.pointer_x += dx;
+                    self.state.seat.pointer_y += dy;
+                    self.pointer_moved();
                 }
                 BackendEvent::PointerBtnPress(_id, btn) => {
                     if self.state.seat.get_mods().alt && btn == BTN_LEFT {
@@ -315,7 +339,7 @@ impl Drop for Server {
     }
 }
 
-fn pipe() -> io::Result<(OwnedFd, OwnedFd)> {
+pub fn pipe() -> io::Result<(OwnedFd, OwnedFd)> {
     let mut fds = [0, 0];
     if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } == -1 {
         return Err(io::Error::last_os_error());
@@ -339,7 +363,6 @@ fn main() {
 
     let mut socket_path: PathBuf = env::var_os("XDG_RUNTIME_DIR").unwrap().into();
     socket_path.push(format!("wayland-{socket_number}"));
-    println!("Running on {}", socket_path.display());
 
     let mut server = Server::new(socket_path.clone());
     server
@@ -347,6 +370,7 @@ fn main() {
         .add_fd(quit_read.as_raw_fd(), event_loop::Event::Quit)
         .unwrap();
 
+    println!("Running on {}", socket_path.display());
     std::env::set_var("WAYLAND_DISPLAY", &socket_path);
     std::process::Command::new("foot").spawn().unwrap();
 
@@ -367,11 +391,11 @@ fn main() {
                     server.clients.insert(id, client);
                 }
             },
-            event_loop::Event::Backend => server.poll_backend().unwrap(),
+            event_loop::Event::Backend(id) => server.poll_backend(id).unwrap(),
             event_loop::Event::Quit => break,
             event_loop::Event::Client(client_id) => {
                 let client = server.clients.get_mut(&client_id).unwrap();
-                print_client_surface_tree(client);
+                // print_client_surface_tree(client);
                 if let Err(e) = client.poll(&mut server.state) {
                     eprintln!("client error: {e}");
                     server.destroy_client(client_id);
