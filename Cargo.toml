@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "ewc-wayland-scanner", "libseat"]
+members = [".", "ewc-wayland-scanner", "ewcdbg", "libseat"]
 
 [workspace.package]
 authors = ["MaxVerevkin <maxxverrr@gmail.com>"]

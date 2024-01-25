@@ -212,7 +212,7 @@ pub struct SubsurfaceRole {
 }
 
 impl IsGlobal for WlCompositor {
-    fn on_bind(&self, _client: &mut Client) {
+    fn on_bind(&self, _client: &mut Client, _state: &mut State) {
         self.set_callback(|ctx| {
             use wl_compositor::Request;
             match ctx.request {
@@ -237,7 +237,7 @@ impl IsGlobal for WlCompositor {
 }
 
 impl IsGlobal for WlSubcompositor {
-    fn on_bind(&self, _client: &mut Client) {
+    fn on_bind(&self, _client: &mut Client, _state: &mut State) {
         self.set_callback(|ctx| {
             use wl_subcompositor::Request;
             match ctx.request {

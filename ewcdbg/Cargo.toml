@@ -1,0 +1,9 @@
+[package]
+name = "ewcdbg"
+version = "0.1.0"
+authors.workspace = true
+readme.workspace = true
+edition.workspace = true
+
+[dependencies]
+wayrs-client = "1.0"

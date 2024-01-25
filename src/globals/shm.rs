@@ -32,7 +32,7 @@ impl Shm {
 }
 
 impl IsGlobal for WlShm {
-    fn on_bind(&self, _client: &mut Client) {
+    fn on_bind(&self, _client: &mut Client, _state: &mut State) {
         self.format(wl_shm::Format::Argb8888);
         self.format(wl_shm::Format::Abgr8888);
         self.set_callback(wl_shm_cb);

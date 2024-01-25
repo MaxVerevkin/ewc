@@ -190,5 +190,5 @@ fn wl_registry_cb(ctx: RequestCtx<WlRegistry>) -> io::Result<()> {
         .find(|g| g.name() == args.name)
         .ok_or_else(|| io::Error::other("wl_registry::bind with invalid name"))?
         .clone();
-    global.bind(ctx.client, args)
+    global.bind(ctx.client, ctx.state, args)
 }

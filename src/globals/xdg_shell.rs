@@ -183,7 +183,7 @@ pub enum MapState {
 }
 
 impl IsGlobal for XdgWmBase {
-    fn on_bind(&self, _client: &mut crate::Client) {
+    fn on_bind(&self, _client: &mut crate::Client, _state: &mut State) {
         self.set_callback(|ctx| {
             use xdg_wm_base::Request;
             match ctx.request {

@@ -4,6 +4,7 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::env;
+use std::ffi::CString;
 use std::io;
 use std::num::NonZeroU32;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
@@ -48,6 +49,7 @@ pub struct State {
     pub seat: Seat,
     pub cursor: Option<(Rc<Surface>, i32, i32)>,
     pub focus_stack: FocusStack,
+    pub debuggers: Vec<EwcDebugV1>,
 }
 
 #[derive(Default, Clone)]
@@ -71,13 +73,29 @@ fn choose_backend() -> Box<dyn Backend> {
     panic!("No backend available")
 }
 
+macro_rules! debug {
+    ($server:ident, $($fmt:tt)*) => {
+        if !$server.state.debuggers.is_empty() {
+            $server.debug(&format!($($fmt)*));
+        }
+    };
+}
+
 impl Server {
     pub fn destroy_client(&mut self, client_id: ClientId) {
         eprintln!("destroying client");
         self.state.focus_stack.remove_client(client_id);
+        self.state.debuggers.retain(|x| x.client_id() != client_id);
         let client = self.clients.remove(&client_id).unwrap();
         client.shm.destroy(&mut self.state);
         self.event_loop.remove(client.conn.as_raw_fd()).unwrap();
+    }
+
+    pub fn debug(&self, str: &str) {
+        let message = CString::new(str).unwrap();
+        for debugger in &self.state.debuggers {
+            debugger.message(message.clone());
+        }
     }
 
     pub fn new(socket_path: PathBuf) -> Self {
@@ -109,11 +127,13 @@ impl Server {
                     Global::new::<WlDataDeviceManager>(5, 3),
                     Seat::global(6),
                     Global::new::<WlOutput>(7, 2),
+                    Global::new::<EwcDebugV1>(8, 1),
                 ],
                 backend,
                 seat: Seat::new(),
                 cursor: None,
                 focus_stack: FocusStack::default(),
+                debuggers: Vec::new(),
             },
         }
     }
@@ -212,7 +232,7 @@ impl Server {
             match event {
                 BackendEvent::ShutDown => return Err(io::Error::other("backend shutdown")),
                 BackendEvent::Frame => {
-                    // let t = std::time::Instant::now();
+                    let t = std::time::Instant::now();
                     self.state.backend.render_frame(&mut |frame| {
                         frame.clear(0.2, 0.1, 0.2);
                         for (toplevel_i, toplevel) in
@@ -261,7 +281,7 @@ impl Server {
                             }
                         }
                     });
-                    // dbg!(t.elapsed());
+                    debug!(self, "Frame composed in {:?}", t.elapsed());
                 }
                 BackendEvent::NewKeyboard(_id) => (),
                 BackendEvent::KeyboardRemoved(_id) => (),

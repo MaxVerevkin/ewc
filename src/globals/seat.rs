@@ -14,7 +14,7 @@ use crate::focus_stack::FocusStack;
 use crate::globals::compositor::SurfaceRole;
 use crate::protocol::*;
 use crate::wayland_core::{Fixed, Proxy};
-use crate::Client;
+use crate::{Client, State};
 
 // pub const BTN_MOUSE: u32 = 0x110;
 pub const BTN_LEFT: u32 = 0x110;
@@ -354,7 +354,7 @@ impl ClientSeat {
 }
 
 impl IsGlobal for WlSeat {
-    fn on_bind(&self, _client: &mut Client) {
+    fn on_bind(&self, _client: &mut Client, _state: &mut State) {
         self.capabilities(wl_seat::Capability::Keyboard | wl_seat::Capability::Pointer);
         self.set_callback(|ctx| {
             use wl_seat::Request;
