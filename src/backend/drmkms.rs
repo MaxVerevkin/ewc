@@ -62,8 +62,18 @@ pub fn new() -> Option<Box<dyn Backend>> {
             32,
         )
         .expect("Could not create dumb buffer");
+    let buf2 = card
+        .create_dumb_buffer(
+            (disp_width as u32, disp_height as u32),
+            DrmFourcc::Xrgb8888,
+            32,
+        )
+        .expect("Could not create dumb buffer");
     let fb = card
         .add_framebuffer(&buf, 24, 32)
+        .expect("Could not create FB");
+    let fb2 = card
+        .add_framebuffer(&buf2, 24, 32)
         .expect("Could not create FB");
 
     let planes = card.plane_handles().expect("Could not list planes");
@@ -180,9 +190,6 @@ pub fn new() -> Option<Box<dyn Backend>> {
         plane_props["CRTC_H"].handle(),
         drm::control::property::Value::UnsignedRange(mode.size().1 as u64),
     );
-
-    // Set the crtc
-    // On many setups, this requires root access.
     card.atomic_commit(AtomicCommitFlags::ALLOW_MODESET, atomic_req.clone())
         .expect("Failed to set mode");
 
@@ -190,9 +197,10 @@ pub fn new() -> Option<Box<dyn Backend>> {
         card,
         seat,
         libinput,
-        buf,
-        buf_data: vec![0u8; disp_width as usize * disp_height as usize * 4],
-        fb,
+        buf_front: buf,
+        buf_back: buf2,
+        fb_front: fb,
+        fb_back: fb2,
         crtc: crtc.handle(),
         backend_events_queue: VecDeque::from([BackendEvent::Frame]),
         renderer_state: RendererState::new(),
@@ -203,10 +211,11 @@ struct BackendImp {
     card: Card,
     seat: Rc<libseat::Seat>,
     libinput: Libinput,
-    buf: DumbBuffer,
-    buf_data: Vec<u8>,
+    buf_front: DumbBuffer,
+    buf_back: DumbBuffer,
     crtc: drm::control::crtc::Handle,
-    fb: drm::control::framebuffer::Handle,
+    fb_front: drm::control::framebuffer::Handle,
+    fb_back: drm::control::framebuffer::Handle,
     backend_events_queue: VecDeque<BackendEvent>,
     renderer_state: RendererState,
 }
@@ -255,8 +264,10 @@ impl drm::control::Device for Card {}
 
 impl Drop for BackendImp {
     fn drop(&mut self) {
-        self.card.destroy_framebuffer(self.fb).unwrap();
-        self.card.destroy_dumb_buffer(self.buf).unwrap();
+        self.card.destroy_framebuffer(self.fb_back).unwrap();
+        self.card.destroy_dumb_buffer(self.buf_back).unwrap();
+        self.card.destroy_framebuffer(self.fb_front).unwrap();
+        self.card.destroy_dumb_buffer(self.buf_front).unwrap();
 
         let id = self.card.id.take().unwrap();
         self.seat.close_device(id).unwrap();
@@ -417,37 +428,35 @@ impl Backend for BackendImp {
     }
 
     fn render_frame(&mut self, f: &mut dyn FnMut(&mut dyn Frame)) {
-        let (width, height) = self.buf.size();
+        std::mem::swap(&mut self.fb_front, &mut self.fb_back);
+        std::mem::swap(&mut self.buf_front, &mut self.buf_back);
+
+        let (width, height) = self.buf_front.size();
         const FORMAT: wl_shm::Format = wl_shm::Format::Argb8888;
-        f(&mut FrameImp {
-            time: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as u32,
-            width,
-            height,
-            renderer: Renderer::new(
-                &self.renderer_state,
-                &mut self.buf_data,
+        {
+            let mut map = self
+                .card
+                .map_dumb_buffer(&mut self.buf_back)
+                .expect("Could not map dumbbuffer");
+            f(&mut FrameImp {
+                time: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u32,
                 width,
                 height,
-                FORMAT as u32,
-            ),
-        });
+                renderer: Renderer::new(
+                    &self.renderer_state,
+                    &mut *map,
+                    width,
+                    height,
+                    FORMAT as u32,
+                ),
+            });
+        }
 
-        let mut map = self
-            .card
-            .map_dumb_buffer(&mut self.buf)
-            .expect("Could not map dumbbuffer");
-        unsafe {
-            libc::memcpy(
-                map.as_mut_ptr().cast(),
-                self.buf_data.as_mut_ptr().cast(),
-                self.buf_data.len(),
-            )
-        };
         self.card
-            .page_flip(self.crtc, self.fb, PageFlipFlags::EVENT, None)
+            .page_flip(self.crtc, self.fb_back, PageFlipFlags::EVENT, None)
             .unwrap();
     }
 }
