@@ -199,6 +199,7 @@ pub fn new() -> Option<Box<dyn Backend>> {
         libinput,
         buf_front: buf,
         buf_back: buf2,
+        temp_buf: vec![0u8; disp_width as usize * disp_height as usize * 4],
         fb_front: fb,
         fb_back: fb2,
         crtc: crtc.handle(),
@@ -213,6 +214,7 @@ struct BackendImp {
     libinput: Libinput,
     buf_front: DumbBuffer,
     buf_back: DumbBuffer,
+    temp_buf: Vec<u8>,
     crtc: drm::control::crtc::Handle,
     fb_front: drm::control::framebuffer::Handle,
     fb_back: drm::control::framebuffer::Handle,
@@ -432,28 +434,31 @@ impl Backend for BackendImp {
         std::mem::swap(&mut self.buf_front, &mut self.buf_back);
 
         let (width, height) = self.buf_front.size();
-        const FORMAT: wl_shm::Format = wl_shm::Format::Argb8888;
-        {
-            let mut map = self
-                .card
-                .map_dumb_buffer(&mut self.buf_back)
-                .expect("Could not map dumbbuffer");
-            f(&mut FrameImp {
-                time: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis() as u32,
+        const FORMAT: wl_shm::Format = wl_shm::Format::Xrgb8888;
+
+        f(&mut FrameImp {
+            time: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u32,
+            width,
+            height,
+            renderer: Renderer::new(
+                &self.renderer_state,
+                &mut self.temp_buf,
                 width,
                 height,
-                renderer: Renderer::new(
-                    &self.renderer_state,
-                    &mut *map,
-                    width,
-                    height,
-                    FORMAT as u32,
-                ),
-            });
-        }
+                FORMAT as u32,
+            ),
+        });
+
+        // Reading from mapped buffer is terribly slow, but required for blending.
+        // When blending is involved, rendering to a CPU buffer and then copying is much faster.
+        let mut map = self
+            .card
+            .map_dumb_buffer(&mut self.buf_back)
+            .expect("Could not map dumbbuffer");
+        map.copy_from_slice(&self.temp_buf);
 
         self.card
             .page_flip(self.crtc, self.fb_back, PageFlipFlags::EVENT, None)

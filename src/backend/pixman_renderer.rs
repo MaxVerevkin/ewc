@@ -272,6 +272,7 @@ fn wl_format_to_pixman(format: u32) -> Option<pixman::FormatCode> {
     use pixman::FormatCode as Pix;
     match format {
         0 => Some(Pix::A8R8G8B8),
+        1 => Some(Pix::X8R8G8B8),
         0x34324241 => Some(Pix::A8B8G8R8),
         _ => None,
     }
