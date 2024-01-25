@@ -303,7 +303,6 @@ fn wl_surface_cb(ctx: RequestCtx<WlSurface>) -> io::Result<()> {
     use wl_surface::Request;
     match ctx.request {
         Request::Destroy => {
-            eprintln!("destroying {:?}", ctx.proxy);
             if !matches!(
                 &*surface.role.borrow(),
                 SurfaceRole::None | SurfaceRole::Cursor,
@@ -436,7 +435,6 @@ fn wl_subsurface_cb(ctx: RequestCtx<WlSubsurface>) -> io::Result<()> {
     use wl_subsurface::Request;
     match ctx.request {
         Request::Destroy => {
-            eprintln!("destroying {:?}", ctx.proxy);
             *subsurface.surface.upgrade().unwrap().role.borrow_mut() = SurfaceRole::None;
             let subsurface = ctx
                 .client

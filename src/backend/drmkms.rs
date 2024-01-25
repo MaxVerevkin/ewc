@@ -1,13 +1,12 @@
 use std::collections::{HashMap, VecDeque};
-use std::io::{self, Write};
+use std::io;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
 use std::path::Path;
 use std::rc::Rc;
 
 use drm::buffer::{Buffer as _, DrmFourcc};
 use drm::control::dumbbuffer::DumbBuffer;
-use drm::control::{self, atomic, property, AtomicCommitFlags, Device as _};
-use drm::control::{connector, crtc};
+use drm::control::{AtomicCommitFlags, Device as _, PageFlipFlags};
 use drm::Device as _;
 use input::event::keyboard::KeyboardEventTrait;
 use input::Libinput;
@@ -35,12 +34,12 @@ pub fn new() -> Option<Box<dyn Backend>> {
     let res = card
         .resource_handles()
         .expect("Could not load normal resource ids.");
-    let coninfo: Vec<connector::Info> = res
+    let coninfo: Vec<drm::control::connector::Info> = res
         .connectors()
         .iter()
         .flat_map(|con| card.get_connector(*con, true))
         .collect();
-    let crtcinfo: Vec<crtc::Info> = res
+    let crtcinfo: Vec<drm::control::crtc::Info> = res
         .crtcs()
         .iter()
         .flat_map(|crtc| card.get_crtc(*crtc))
@@ -48,7 +47,7 @@ pub fn new() -> Option<Box<dyn Backend>> {
 
     let con = coninfo
         .iter()
-        .find(|i| i.state() == connector::State::Connected)
+        .find(|i| i.state() == drm::control::connector::State::Connected)
         .expect("No connected connectors");
     let mode = *con.modes().first().expect("No modes found on connector");
     let (disp_width, disp_height) = mode.size();
@@ -69,8 +68,8 @@ pub fn new() -> Option<Box<dyn Backend>> {
 
     let planes = card.plane_handles().expect("Could not list planes");
     let (better_planes, compatible_planes): (
-        Vec<control::plane::Handle>,
-        Vec<control::plane::Handle>,
+        Vec<drm::control::plane::Handle>,
+        Vec<drm::control::plane::Handle>,
     ) = planes
         .iter()
         .filter(|&&plane| {
@@ -116,11 +115,11 @@ pub fn new() -> Option<Box<dyn Backend>> {
         .as_hashmap(&card)
         .expect("Could not get a prop from plane");
 
-    let mut atomic_req = atomic::AtomicModeReq::new();
+    let mut atomic_req = drm::control::atomic::AtomicModeReq::new();
     atomic_req.add_property(
         con.handle(),
         con_props["CRTC_ID"].handle(),
-        property::Value::CRTC(Some(crtc.handle())),
+        drm::control::property::Value::CRTC(Some(crtc.handle())),
     );
     let blob = card
         .create_property_blob(&mode)
@@ -129,74 +128,63 @@ pub fn new() -> Option<Box<dyn Backend>> {
     atomic_req.add_property(
         crtc.handle(),
         crtc_props["ACTIVE"].handle(),
-        property::Value::Boolean(true),
+        drm::control::property::Value::Boolean(true),
     );
     atomic_req.add_property(
         plane,
         plane_props["FB_ID"].handle(),
-        property::Value::Framebuffer(Some(fb)),
+        drm::control::property::Value::Framebuffer(Some(fb)),
     );
     atomic_req.add_property(
         plane,
         plane_props["CRTC_ID"].handle(),
-        property::Value::CRTC(Some(crtc.handle())),
+        drm::control::property::Value::CRTC(Some(crtc.handle())),
     );
     atomic_req.add_property(
         plane,
         plane_props["SRC_X"].handle(),
-        property::Value::UnsignedRange(0),
+        drm::control::property::Value::UnsignedRange(0),
     );
     atomic_req.add_property(
         plane,
         plane_props["SRC_Y"].handle(),
-        property::Value::UnsignedRange(0),
+        drm::control::property::Value::UnsignedRange(0),
     );
     atomic_req.add_property(
         plane,
         plane_props["SRC_W"].handle(),
-        property::Value::UnsignedRange((mode.size().0 as u64) << 16),
+        drm::control::property::Value::UnsignedRange((mode.size().0 as u64) << 16),
     );
     atomic_req.add_property(
         plane,
         plane_props["SRC_H"].handle(),
-        property::Value::UnsignedRange((mode.size().1 as u64) << 16),
+        drm::control::property::Value::UnsignedRange((mode.size().1 as u64) << 16),
     );
     atomic_req.add_property(
         plane,
         plane_props["CRTC_X"].handle(),
-        property::Value::SignedRange(0),
+        drm::control::property::Value::SignedRange(0),
     );
     atomic_req.add_property(
         plane,
         plane_props["CRTC_Y"].handle(),
-        property::Value::SignedRange(0),
+        drm::control::property::Value::SignedRange(0),
     );
     atomic_req.add_property(
         plane,
         plane_props["CRTC_W"].handle(),
-        property::Value::UnsignedRange(mode.size().0 as u64),
+        drm::control::property::Value::UnsignedRange(mode.size().0 as u64),
     );
     atomic_req.add_property(
         plane,
         plane_props["CRTC_H"].handle(),
-        property::Value::UnsignedRange(mode.size().1 as u64),
+        drm::control::property::Value::UnsignedRange(mode.size().1 as u64),
     );
 
     // Set the crtc
     // On many setups, this requires root access.
     card.atomic_commit(AtomicCommitFlags::ALLOW_MODESET, atomic_req.clone())
         .expect("Failed to set mode");
-
-    // HACK: poor man's vsync
-    let (frame_pipe, frame_notify) = crate::pipe().unwrap();
-    std::thread::spawn(move || {
-        let mut file = std::fs::File::from(frame_notify);
-        loop {
-            file.write_all(&[0]).unwrap();
-            #[allow(deprecated)]
-            std::thread::sleep_ms(30);
-        }
-    });
 
     Some(Box::new(BackendImp {
         card,
@@ -205,8 +193,8 @@ pub fn new() -> Option<Box<dyn Backend>> {
         buf,
         buf_data: vec![0u8; disp_width as usize * disp_height as usize * 4],
         fb,
-        frame_pipe,
-        backend_events_queue: VecDeque::new(),
+        crtc: crtc.handle(),
+        backend_events_queue: VecDeque::from([BackendEvent::Frame]),
         renderer_state: RendererState::new(),
     }))
 }
@@ -217,8 +205,8 @@ struct BackendImp {
     libinput: Libinput,
     buf: DumbBuffer,
     buf_data: Vec<u8>,
+    crtc: drm::control::crtc::Handle,
     fb: drm::control::framebuffer::Handle,
-    frame_pipe: OwnedFd,
     backend_events_queue: VecDeque<BackendEvent>,
     renderer_state: RendererState,
 }
@@ -275,7 +263,7 @@ impl Drop for BackendImp {
     }
 }
 
-const FRAME_PIPE: u32 = 0;
+const DRM: u32 = 0;
 const LIBSEAT: u32 = 1;
 const LIBINPUT: u32 = 2;
 
@@ -284,7 +272,7 @@ impl Backend for BackendImp {
         &self,
         reg: &'_ mut dyn FnMut(RawFd, u32) -> io::Result<()>,
     ) -> io::Result<()> {
-        reg(self.frame_pipe.as_raw_fd(), FRAME_PIPE)?;
+        reg(self.card.fd.as_raw_fd(), DRM)?;
         reg(self.seat.get_fd().unwrap().as_raw_fd(), LIBSEAT)?;
         reg(self.libinput.as_raw_fd(), LIBINPUT)?;
         Ok(())
@@ -292,18 +280,16 @@ impl Backend for BackendImp {
 
     fn poll(&mut self, data: u32) -> io::Result<()> {
         match data {
-            FRAME_PIPE => {
-                let mut buf = [0u8; 16];
-                assert!(
-                    unsafe {
-                        libc::read(
-                            self.frame_pipe.as_raw_fd(),
-                            buf.as_mut_ptr().cast(),
-                            buf.len(),
-                        )
-                    } > 0
-                );
-                self.backend_events_queue.push_back(BackendEvent::Frame);
+            DRM => {
+                for event in self.card.receive_events().unwrap() {
+                    match event {
+                        drm::control::Event::Vblank(_) => todo!("vblank"),
+                        drm::control::Event::PageFlip(_event) => {
+                            self.backend_events_queue.push_back(BackendEvent::Frame);
+                        }
+                        drm::control::Event::Unknown(_) => todo!("unknown"),
+                    }
+                }
             }
             LIBSEAT => {
                 self.seat.dispatch(0).unwrap();
@@ -460,6 +446,9 @@ impl Backend for BackendImp {
                 self.buf_data.len(),
             )
         };
+        self.card
+            .page_flip(self.crtc, self.fb, PageFlipFlags::EVENT, None)
+            .unwrap();
     }
 }
 
