@@ -1,1 +1,3 @@
-# EWC - Explorary Wayland Compositor
+# EWC - Experimental Wayland Compositor
+
+Wayland compositor from scratch in Rust.
