@@ -420,7 +420,16 @@ fn wl_pointer_cb(ctx: EventCtx<State, WlPointer>) {
                 _ => unreachable!(),
             });
         }
-        // Event::Axis(_) => todo!(),
+        Event::Axis(args) => {
+            if args.axis == wl_pointer::Axis::VerticalScroll {
+                ctx.state
+                    .backend_events_queue
+                    .push_back(BackendEvent::PointerAxisVertial(
+                        ptr.id,
+                        args.value.as_f32(),
+                    ));
+            }
+        }
         // Event::Frame => todo!(),
         // Event::AxisSource(_) => todo!(),
         // Event::AxisStop(_) => todo!(),

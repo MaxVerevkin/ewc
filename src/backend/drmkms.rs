@@ -10,6 +10,7 @@ use drm::control::dumbbuffer::DumbBuffer;
 use drm::control::{AtomicCommitFlags, Device as _};
 use drm::Device as _;
 use input::event::keyboard::KeyboardEventTrait;
+use input::event::pointer::PointerScrollEvent;
 use input::Libinput;
 
 use super::pixman_renderer::*;
@@ -390,7 +391,24 @@ impl Backend for BackendImp {
                                 );
                             }
                             // input::event::PointerEvent::Axis(_) => todo!(),
-                            // input::event::PointerEvent::ScrollWheel(_) => todo!(),
+                            input::event::PointerEvent::ScrollWheel(scroll_wheel) => {
+                                assert!(
+                                    !scroll_wheel.has_axis(input::event::pointer::Axis::Horizontal)
+                                );
+                                let value = scroll_wheel
+                                    .has_axis(input::event::pointer::Axis::Vertical)
+                                    .then(|| {
+                                        scroll_wheel
+                                            .scroll_value(input::event::pointer::Axis::Vertical)
+                                    })
+                                    .unwrap_or(0.0);
+                                self.backend_events_queue.push_back(
+                                    BackendEvent::PointerAxisVertial(
+                                        PointerId(NonZeroU64::MIN),
+                                        value as f32,
+                                    ),
+                                );
+                            }
                             // input::event::PointerEvent::ScrollFinger(_) => todo!(),
                             // input::event::PointerEvent::ScrollContinuous(_) => todo!(),
                             _ => (),

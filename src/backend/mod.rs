@@ -73,6 +73,7 @@ pub enum BackendEvent {
     PointerMotionRelative(PointerId, f32, f32),
     PointerBtnPress(PointerId, u32),
     PointerBtnRelease(PointerId, u32),
+    PointerAxisVertial(PointerId, f32),
     PointerRemoved(PointerId),
 }
 

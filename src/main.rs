@@ -345,6 +345,9 @@ impl Server {
                         self.state.seat.ptr_forward_btn(btn, false);
                     }
                 },
+                BackendEvent::PointerAxisVertial(_id, value) => {
+                    self.state.seat.ptr_axis_vertical(value);
+                }
                 BackendEvent::PointerRemoved(_id) => (),
             }
         }

@@ -220,6 +220,21 @@ impl Seat {
         }
     }
 
+    pub fn ptr_axis_vertical(&mut self, value: f32) {
+        if let Some(surface) = self.ptr_get_focused_surface() {
+            if surface.is_alive() {
+                for ptr in surface.conn().seat.pointers.borrow().iter() {
+                    if value != 0.0 {
+                        ptr.wl
+                            .axis(0, wl_pointer::Axis::VerticalScroll, Fixed::from(value));
+                    }
+                }
+            } else {
+                self.ptr_state = PtrState::None;
+            }
+        }
+    }
+
     pub fn ptr_start_move(&mut self, focus_stack: &mut FocusStack, toplevel_i: Option<usize>) {
         let Some(toplevel_i) =
             toplevel_i.or_else(|| focus_stack.toplevel_at(self.pointer_x, self.pointer_y))
