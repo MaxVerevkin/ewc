@@ -8,7 +8,7 @@ use std::io;
 use std::num::NonZeroU32;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::net::UnixListener;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use globals::ewc_debug::Debugger;
@@ -377,11 +377,23 @@ pub fn pipe() -> io::Result<(OwnedFd, OwnedFd)> {
     Ok(unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) })
 }
 
+fn select_socket_name(xdg_runtime: &Path) -> Option<(String, PathBuf)> {
+    for num in 0..10 {
+        let socket_name = format!("wayland-{num}");
+        let path = xdg_runtime.join(&socket_name);
+        if !path.exists() {
+            return Some((socket_name, path));
+        }
+    }
+    None
+}
+
 fn main() {
-    let socket_number = std::env::args()
-        .nth(1)
-        .map(|arg| dbg!(arg).parse::<u32>().unwrap())
-        .unwrap_or(10);
+    let xdg_runtime: PathBuf = env::var_os("XDG_RUNTIME_DIR")
+        .expect("no XDG_RUNTIME_DIR variable")
+        .into();
+    let (socket_name, socket_path) =
+        select_socket_name(&xdg_runtime).expect("could not select socket");
 
     let (quit_read, quit_write) = pipe().unwrap();
     signal_hook::low_level::pipe::register(signal_hook::consts::SIGTERM, quit_write.as_raw_fd())
@@ -389,17 +401,14 @@ fn main() {
     signal_hook::low_level::pipe::register(signal_hook::consts::SIGINT, quit_write.as_raw_fd())
         .unwrap();
 
-    let mut socket_path: PathBuf = env::var_os("XDG_RUNTIME_DIR").unwrap().into();
-    socket_path.push(format!("wayland-{socket_number}"));
-
-    let mut server = Server::new(socket_path.clone());
+    let mut server = Server::new(socket_path);
     server
         .event_loop
         .add_fd(quit_read.as_raw_fd(), event_loop::Event::Quit)
         .unwrap();
 
-    println!("Running on {}", socket_path.display());
-    std::env::set_var("WAYLAND_DISPLAY", &socket_path);
+    println!("Running on {socket_name}");
+    std::env::set_var("WAYLAND_DISPLAY", socket_name);
     std::process::Command::new("foot").spawn().unwrap();
 
     loop {
