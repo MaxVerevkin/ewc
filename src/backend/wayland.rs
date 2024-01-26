@@ -110,6 +110,8 @@ impl Backend for BackendImp {
         self.state.backend_events_queue.pop_front()
     }
 
+    fn switch_vt(&mut self, _vt: u32) {}
+
     fn create_shm_pool(&mut self, fd: OwnedFd, size: usize) -> ShmPoolId {
         self.renderer_state.create_shm_pool(fd, size)
     }

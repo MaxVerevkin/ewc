@@ -13,6 +13,7 @@ pub trait Backend {
     ) -> io::Result<()>;
     fn poll(&mut self, data: u32) -> io::Result<()>;
     fn next_event(&mut self) -> Option<BackendEvent>;
+    fn switch_vt(&mut self, vt: u32);
     fn create_shm_pool(&mut self, fd: OwnedFd, size: usize) -> ShmPoolId;
     fn resize_shm_pool(&mut self, pool_id: ShmPoolId, new_size: usize);
     fn shm_pool_resource_destroyed(&mut self, pool_id: ShmPoolId);

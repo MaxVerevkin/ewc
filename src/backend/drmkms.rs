@@ -83,18 +83,16 @@ pub fn new() -> Option<Box<dyn Backend>> {
     ) = planes
         .iter()
         .filter(|&&plane| {
-            card.get_plane(plane)
-                .map(|plane_info| {
-                    let compatible_crtcs = res.filter_crtcs(plane_info.possible_crtcs());
-                    compatible_crtcs.contains(&crtc.handle())
-                })
-                .unwrap_or(false)
+            card.get_plane(plane).is_ok_and(|plane_info| {
+                let compatible_crtcs = res.filter_crtcs(plane_info.possible_crtcs());
+                compatible_crtcs.contains(&crtc.handle())
+            })
         })
         .partition(|&&plane| {
             if let Ok(props) = card.get_properties(plane) {
                 for (&id, &val) in props.iter() {
                     if let Ok(info) = card.get_property(id) {
-                        if info.name().to_str().map(|x| x == "type").unwrap_or(false) {
+                        if info.name().to_str().is_ok_and(|x| x == "type") {
                             return val == (drm::control::PlaneType::Primary as u32).into();
                         }
                     }
@@ -190,10 +188,14 @@ pub fn new() -> Option<Box<dyn Backend>> {
         plane_props["CRTC_H"].handle(),
         drm::control::property::Value::UnsignedRange(mode.size().1 as u64),
     );
-    card.atomic_commit(AtomicCommitFlags::ALLOW_MODESET, atomic_req.clone())
-        .expect("Failed to set mode");
+    card.atomic_commit(
+        AtomicCommitFlags::ALLOW_MODESET | AtomicCommitFlags::PAGE_FLIP_EVENT,
+        atomic_req.clone(),
+    )
+    .expect("Failed to set mode");
 
     Some(Box::new(BackendImp {
+        suspended: false,
         card,
         seat,
         libinput,
@@ -203,21 +205,28 @@ pub fn new() -> Option<Box<dyn Backend>> {
         fb_front: fb,
         fb_back: fb2,
         crtc: crtc.handle(),
-        backend_events_queue: VecDeque::from([BackendEvent::Frame]),
+        atomic_req,
+        plane,
+        plane_props,
+        backend_events_queue: VecDeque::new(),
         renderer_state: RendererState::new(),
     }))
 }
 
 struct BackendImp {
+    suspended: bool,
     card: Card,
     seat: Rc<libseat::Seat>,
     libinput: Libinput,
     buf_front: DumbBuffer,
     buf_back: DumbBuffer,
     temp_buf: Vec<u8>,
-    crtc: drm::control::crtc::Handle,
     fb_front: drm::control::framebuffer::Handle,
     fb_back: drm::control::framebuffer::Handle,
+    crtc: drm::control::crtc::Handle,
+    atomic_req: drm::control::atomic::AtomicModeReq,
+    plane: drm::control::plane::Handle,
+    plane_props: HashMap<String, drm::control::property::Info>,
     backend_events_queue: VecDeque<BackendEvent>,
     renderer_state: RendererState,
 }
@@ -309,11 +318,29 @@ impl Backend for BackendImp {
                 while let Some(seat_event) = self.seat.next_event() {
                     match seat_event {
                         libseat::Event::Enable => {
-                            eprintln!("seat enabled");
+                            if self.suspended {
+                                eprintln!("seat enabled");
+                                self.atomic_req.add_property(
+                                    self.plane,
+                                    self.plane_props["FB_ID"].handle(),
+                                    drm::control::property::Value::Framebuffer(Some(self.fb_front)),
+                                );
+                                self.card
+                                    .atomic_commit(
+                                        AtomicCommitFlags::ALLOW_MODESET
+                                            | AtomicCommitFlags::PAGE_FLIP_EVENT,
+                                        self.atomic_req.clone(),
+                                    )
+                                    .expect("Failed to set mode");
+                                self.libinput.resume().unwrap();
+                                self.suspended = false;
+                            }
                         }
                         libseat::Event::Disable => {
+                            eprintln!("seat disabled");
                             self.seat.disable().unwrap();
-                            todo!("seat disabled");
+                            self.libinput.suspend();
+                            self.suspended = true;
                         }
                     }
                 }
@@ -387,6 +414,10 @@ impl Backend for BackendImp {
         self.backend_events_queue.pop_front()
     }
 
+    fn switch_vt(&mut self, vt: u32) {
+        self.seat.switch_session(vt as i32).unwrap();
+    }
+
     fn create_shm_pool(&mut self, fd: OwnedFd, size: usize) -> ShmPoolId {
         self.renderer_state.create_shm_pool(fd, size)
     }
@@ -430,6 +461,10 @@ impl Backend for BackendImp {
     }
 
     fn render_frame(&mut self, f: &mut dyn FnMut(&mut dyn Frame)) {
+        if self.suspended {
+            return;
+        }
+
         std::mem::swap(&mut self.fb_front, &mut self.fb_back);
         std::mem::swap(&mut self.buf_front, &mut self.buf_back);
 

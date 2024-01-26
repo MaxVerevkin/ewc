@@ -286,15 +286,19 @@ impl Server {
                 BackendEvent::NewKeyboard(_id) => (),
                 BackendEvent::KeyboardRemoved(_id) => (),
                 BackendEvent::KeyPressed(_id, key) => {
-                    if self.state.seat.get_mods().logo
-                        && self
-                            .state
-                            .seat
-                            .xkb_state
-                            .key_get_one_sym(xkb::Keycode::new(key + 8))
-                            == xkb::Keysym::Escape
-                    {
+                    let keysym = self
+                        .state
+                        .seat
+                        .xkb_state
+                        .key_get_one_sym(xkb::Keycode::new(key + 8));
+                    if self.state.seat.get_mods().logo && keysym == xkb::Keysym::Escape {
                         return Err(io::Error::other("quit"));
+                    } else if keysym >= xkb::Keysym::XF86_Switch_VT_1
+                        && keysym <= xkb::Keysym::XF86_Switch_VT_12
+                    {
+                        self.state
+                            .backend
+                            .switch_vt(keysym.raw() - xkb::Keysym::XF86_Switch_VT_1.raw() + 1);
                     } else {
                         if let Some(toplevel) = self.state.focus_stack.top() {
                             self.state.seat.kbd_focus_surface(Some(
