@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use wayrs_client::{global::GlobalsExt, Connection, IoMode};
 
-wayrs_client::generate!("../src/protocol/ewc-debug.xml");
+wayrs_client::generate!("../protocol/ewc-debug.xml");
 use ewc_debug_v1::Interest;
 
 const INTERESTS: &[(&'static str, &'static str, ewc_debug_v1::Interest)] = &[
