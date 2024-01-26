@@ -473,9 +473,9 @@ dependencies = [
 
 [[package]]
 name = "wayrs-scanner"
-version = "0.13.0"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97bf6bf9c0696916614de7aaa03eaf01bcca4ec54eb942e41b418c1b53d18cc9"
+checksum = "c99d17b157386bd3d498084361671baf48f5669871e064233852149e8be71596"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",

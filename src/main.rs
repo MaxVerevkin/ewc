@@ -4,7 +4,6 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::env;
-use std::ffi::CString;
 use std::io;
 use std::num::NonZeroU32;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
@@ -12,6 +11,7 @@ use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+use globals::ewc_debug::Debugger;
 use xkbcommon::xkb;
 
 mod backend;
@@ -33,6 +33,15 @@ use crate::protocol::xdg_toplevel::ResizeEdge;
 use crate::protocol::*;
 use crate::wayland_core::*;
 
+// #[macro_export]
+// macro_rules! debug {
+//     ($state:expr, $($fmt:tt)*) => {
+//         if !$state.debuggers.is_empty() {
+//             $state.debug(&format!($($fmt)*));
+//         }
+//     };
+// }
+
 pub struct Server {
     socket: UnixListener,
     socket_path: PathBuf,
@@ -49,7 +58,7 @@ pub struct State {
     pub seat: Seat,
     pub cursor: Option<(Rc<Surface>, i32, i32)>,
     pub focus_stack: FocusStack,
-    pub debuggers: Vec<EwcDebugV1>,
+    pub debugger: Debugger,
 }
 
 #[derive(Default, Clone)]
@@ -73,29 +82,14 @@ fn choose_backend() -> Box<dyn Backend> {
     panic!("No backend available")
 }
 
-macro_rules! debug {
-    ($server:ident, $($fmt:tt)*) => {
-        if !$server.state.debuggers.is_empty() {
-            $server.debug(&format!($($fmt)*));
-        }
-    };
-}
-
 impl Server {
     pub fn destroy_client(&mut self, client_id: ClientId) {
         eprintln!("destroying client");
         self.state.focus_stack.remove_client(client_id);
-        self.state.debuggers.retain(|x| x.client_id() != client_id);
+        self.state.debugger.remove_client(client_id);
         let client = self.clients.remove(&client_id).unwrap();
         client.shm.destroy(&mut self.state);
         self.event_loop.remove(client.conn.as_raw_fd()).unwrap();
-    }
-
-    pub fn debug(&self, str: &str) {
-        let message = CString::new(str).unwrap();
-        for debugger in &self.state.debuggers {
-            debugger.message(message.clone());
-        }
     }
 
     pub fn new(socket_path: PathBuf) -> Self {
@@ -133,7 +127,7 @@ impl Server {
                 seat: Seat::new(),
                 cursor: None,
                 focus_stack: FocusStack::default(),
-                debuggers: Vec::new(),
+                debugger: Debugger::default(),
             },
         }
     }
@@ -281,7 +275,7 @@ impl Server {
                             }
                         }
                     });
-                    debug!(self, "Frame composed in {:?}", t.elapsed());
+                    self.state.debugger.frame(t.elapsed());
                 }
                 BackendEvent::NewKeyboard(_id) => (),
                 BackendEvent::KeyboardRemoved(_id) => (),

@@ -28,11 +28,24 @@
       </description>
     </request>
 
-    <event name="message">
-      <description summary="a debug message">
-        A debug message.
+    <request name="get_debugger">
+      <description summary="create a new debugger">
+        Create a new debugger with specified interest list.
       </description>
-      <arg name="message" type="string" summary="a debug message"/>
+      <arg name="id" type="new_id" interface="ewc_debugger_v1"/>
+      <arg name="interest" type="uint" enum="interest"/>
+    </request>
+
+    <enum name="interest" bitfield="true">
+      <entry name="none" value="0"/>
+      <entry name="frame_stat" value="1"/>
+      <entry name="messages" value="2"/>
+    </enum>
+  </interface>
+
+  <interface name="ewc_debugger_v1" version="1">
+    <event name="frame_stat">
+      <arg name="rendering_duration" type="uint" summary="duration is nanoseconds"/>
     </event>
   </interface>
 </protocol>
