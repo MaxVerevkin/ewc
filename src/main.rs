@@ -317,7 +317,7 @@ impl Server {
                     self.state.seat.update_key(key, false);
                 }
                 BackendEvent::NewPointer(_id) => (),
-                BackendEvent::PointerMotion(_id, x, y) => {
+                BackendEvent::PointerMotionAbsolute(_id, x, y) => {
                     self.state.seat.pointer_x = x;
                     self.state.seat.pointer_y = y;
                     self.pointer_moved();

@@ -393,7 +393,7 @@ fn wl_pointer_cb(ctx: EventCtx<State, WlPointer>) {
             ptr.wl.set_cursor(ctx.conn, args.serial, None, 0, 0);
             ctx.state
                 .backend_events_queue
-                .push_back(BackendEvent::PointerMotion(
+                .push_back(BackendEvent::PointerMotionAbsolute(
                     ptr.id,
                     args.surface_x.as_f32(),
                     args.surface_y.as_f32(),
@@ -403,7 +403,7 @@ fn wl_pointer_cb(ctx: EventCtx<State, WlPointer>) {
         Event::Motion(args) => {
             ctx.state
                 .backend_events_queue
-                .push_back(BackendEvent::PointerMotion(
+                .push_back(BackendEvent::PointerMotionAbsolute(
                     ptr.id,
                     args.surface_x.as_f32(),
                     args.surface_y.as_f32(),

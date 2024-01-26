@@ -69,7 +69,7 @@ pub enum BackendEvent {
     KeyboardRemoved(KeyboardId),
 
     NewPointer(PointerId),
-    PointerMotion(PointerId, f32, f32),
+    PointerMotionAbsolute(PointerId, f32, f32),
     PointerMotionRelative(PointerId, f32, f32),
     PointerBtnPress(PointerId, u32),
     PointerBtnRelease(PointerId, u32),
