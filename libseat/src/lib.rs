@@ -22,7 +22,7 @@ extern "C" fn enable_seat(_seat: *mut sys::libseat, data: *mut c_void) {
 extern "C" fn disable_seat(_seat: *mut sys::libseat, data: *mut c_void) {
     let data = data.cast::<RefCell<VecDeque<Event>>>();
     let data = unsafe { &*data };
-    data.borrow_mut().push_back(Event::Enable);
+    data.borrow_mut().push_back(Event::Disable);
 }
 
 static mut FFI_SEAT_LISTENER: sys::libseat_seat_listener = sys::libseat_seat_listener {
