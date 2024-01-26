@@ -20,6 +20,7 @@ mod event_loop;
 mod focus_stack;
 mod globals;
 mod protocol;
+mod seat;
 mod wayland_core;
 
 use crate::backend::{Backend, BackendEvent, Frame};
@@ -27,16 +28,17 @@ use crate::client::{Client, ClientId};
 use crate::event_loop::EventLoop;
 use crate::focus_stack::FocusStack;
 use crate::globals::compositor::{Compositor, Surface};
-use crate::globals::seat::{PtrState, Seat, BTN_LEFT, BTN_RIGHT};
 use crate::globals::Global;
 use crate::protocol::xdg_toplevel::ResizeEdge;
 use crate::protocol::*;
+use crate::seat::pointer::{PtrState, BTN_LEFT, BTN_RIGHT};
+use crate::seat::Seat;
 use crate::wayland_core::*;
 
 #[macro_export]
 macro_rules! debug {
     ($debugger:expr, $($fmt:tt)*) => {
-        if $debugger.accum_interest().contains(crate::protocol::ewc_debug_v1::Interest::Messages) {
+        if $debugger.accum_interest().contains($crate::protocol::ewc_debug_v1::Interest::Messages) {
             $debugger.message(&format!($($fmt)*));
         }
     };
@@ -153,7 +155,7 @@ fn render_surface(frame: &mut dyn Frame, surf: &Surface, alpha: f32, x: i32, y: 
 
 impl Server {
     fn pointer_moved(&mut self) {
-        match &self.state.seat.ptr_state {
+        match &self.state.seat.pointer.state {
             PtrState::Moving {
                 toplevel,
                 ptr_start_x: px,
@@ -164,10 +166,10 @@ impl Server {
                 let toplevel = toplevel.upgrade().unwrap();
                 toplevel
                     .x
-                    .set(tx + (self.state.seat.pointer_x - px).round() as i32);
+                    .set(tx + (self.state.seat.pointer.x - px).round() as i32);
                 toplevel
                     .y
-                    .set(ty + (self.state.seat.pointer_y - py).round() as i32);
+                    .set(ty + (self.state.seat.pointer.y - py).round() as i32);
             }
             PtrState::Resizing {
                 toplevel,
@@ -182,16 +184,16 @@ impl Server {
                 let mut dw = 0;
                 let mut dh = 0;
                 if *edge as u32 & ResizeEdge::Top as u32 != 0 {
-                    dh = (*py - self.state.seat.pointer_y).round() as i32;
+                    dh = (*py - self.state.seat.pointer.y).round() as i32;
                 }
                 if *edge as u32 & ResizeEdge::Bottom as u32 != 0 {
-                    dh = (self.state.seat.pointer_y - *py).round() as i32;
+                    dh = (self.state.seat.pointer.y - *py).round() as i32;
                 }
                 if *edge as u32 & ResizeEdge::Right as u32 != 0 {
-                    dw = (self.state.seat.pointer_x - *px).round() as i32;
+                    dw = (self.state.seat.pointer.x - *px).round() as i32;
                 }
                 if *edge as u32 & ResizeEdge::Left as u32 != 0 {
-                    dw = (*px - self.state.seat.pointer_x).round() as i32;
+                    dw = (*px - self.state.seat.pointer.x).round() as i32;
                 }
                 if dw != 0 || dh != 0 {
                     toplevel.request_size(
@@ -206,14 +208,15 @@ impl Server {
             }
             _ => {
                 if let Some((_i, surf, sx, sy)) = self.state.focus_stack.surface_at(
-                    self.state.seat.pointer_x.round() as i32,
-                    self.state.seat.pointer_y.round() as i32,
+                    self.state.seat.pointer.x.round() as i32,
+                    self.state.seat.pointer.y.round() as i32,
                 ) {
                     self.state
                         .seat
-                        .ptr_forward_pointer(Some((surf.wl.clone(), sx, sy)));
+                        .pointer
+                        .forward_pointer(Some((surf.wl.clone(), sx, sy)));
                 } else {
-                    self.state.seat.ptr_forward_pointer(None);
+                    self.state.seat.pointer.forward_pointer(None);
                     self.state.cursor = None;
                 }
             }
@@ -257,8 +260,8 @@ impl Server {
                                         buf,
                                         surf.cur.borrow().opaque_region.as_ref(),
                                         1.0,
-                                        self.state.seat.pointer_x.round() as i32 - hx,
-                                        self.state.seat.pointer_y.round() as i32 - hy,
+                                        self.state.seat.pointer.x.round() as i32 - hx,
+                                        self.state.seat.pointer.y.round() as i32 - hy,
                                     );
                                 }
                             }
@@ -268,8 +271,8 @@ impl Server {
                                     0.5,
                                     0.5,
                                     1.0,
-                                    self.state.seat.pointer_x.round() as i32,
-                                    self.state.seat.pointer_y.round() as i32,
+                                    self.state.seat.pointer.x.round() as i32,
+                                    self.state.seat.pointer.y.round() as i32,
                                     10,
                                     10,
                                 );
@@ -284,9 +287,10 @@ impl Server {
                     let keysym = self
                         .state
                         .seat
+                        .keyboard
                         .xkb_state
                         .key_get_one_sym(xkb::Keycode::new(key + 8));
-                    if self.state.seat.get_mods().logo && keysym == xkb::Keysym::Escape {
+                    if self.state.seat.keyboard.get_mods().logo && keysym == xkb::Keysym::Escape {
                         return Err(io::Error::other("quit"));
                     } else if keysym >= xkb::Keysym::XF86_Switch_VT_1
                         && keysym <= xkb::Keysym::XF86_Switch_VT_12
@@ -296,57 +300,59 @@ impl Server {
                             .switch_vt(keysym.raw() - xkb::Keysym::XF86_Switch_VT_1.raw() + 1);
                     } else {
                         if let Some(toplevel) = self.state.focus_stack.top() {
-                            self.state.seat.kbd_focus_surface(Some(
+                            self.state.seat.keyboard.focus_surface(Some(
                                 toplevel.wl_surface.upgrade().unwrap().wl.clone(),
                             ));
                         }
-                        self.state.seat.update_key(key, true);
+                        self.state.seat.keyboard.update_key(key, true);
                     }
                 }
                 BackendEvent::KeyReleased(_id, key) => {
                     if let Some(toplevel) = self.state.focus_stack.top() {
-                        self.state.seat.kbd_focus_surface(Some(
-                            toplevel.wl_surface.upgrade().unwrap().wl.clone(),
-                        ));
+                        self.state
+                            .seat
+                            .keyboard
+                            .focus_surface(Some(toplevel.wl_surface.upgrade().unwrap().wl.clone()));
                     }
-                    self.state.seat.update_key(key, false);
+                    self.state.seat.keyboard.update_key(key, false);
                 }
                 BackendEvent::NewPointer(_id) => (),
                 BackendEvent::PointerMotionAbsolute(_id, x, y) => {
-                    self.state.seat.pointer_x = x;
-                    self.state.seat.pointer_y = y;
+                    self.state.seat.pointer.x = x;
+                    self.state.seat.pointer.y = y;
                     self.pointer_moved();
                 }
                 BackendEvent::PointerMotionRelative(_id, dx, dy) => {
-                    self.state.seat.pointer_x += dx;
-                    self.state.seat.pointer_y += dy;
+                    self.state.seat.pointer.x += dx;
+                    self.state.seat.pointer.y += dy;
                     self.pointer_moved();
                 }
                 BackendEvent::PointerBtnPress(_id, btn) => {
-                    if self.state.seat.get_mods().alt && btn == BTN_LEFT {
+                    if self.state.seat.keyboard.get_mods().alt && btn == BTN_LEFT {
                         self.state
                             .seat
-                            .ptr_start_move(&mut self.state.focus_stack, None);
-                    } else if self.state.seat.get_mods().alt && btn == BTN_RIGHT {
-                        self.state.seat.ptr_start_resize(
+                            .pointer
+                            .start_move(&mut self.state.focus_stack, None);
+                    } else if self.state.seat.keyboard.get_mods().alt && btn == BTN_RIGHT {
+                        self.state.seat.pointer.start_resize(
                             &mut self.state.focus_stack,
                             xdg_toplevel::ResizeEdge::BottomRight,
                             None,
                         );
                     } else {
-                        self.state.seat.ptr_forward_btn(btn, true);
+                        self.state.seat.pointer.forward_btn(btn, true);
                     }
                 }
-                BackendEvent::PointerBtnRelease(_id, btn) => match &self.state.seat.ptr_state {
+                BackendEvent::PointerBtnRelease(_id, btn) => match &self.state.seat.pointer.state {
                     PtrState::Moving { .. } | PtrState::Resizing { .. } => {
-                        self.state.seat.ptr_state = PtrState::None;
+                        self.state.seat.pointer.state = PtrState::None;
                     }
                     _ => {
-                        self.state.seat.ptr_forward_btn(btn, false);
+                        self.state.seat.pointer.forward_btn(btn, false);
                     }
                 },
                 BackendEvent::PointerAxisVertial(_id, value) => {
-                    self.state.seat.ptr_axis_vertical(value);
+                    self.state.seat.pointer.axis_vertical(value);
                 }
                 BackendEvent::PointerRemoved(_id) => (),
             }

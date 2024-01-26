@@ -10,7 +10,6 @@ use crate::{Client, State};
 
 pub mod compositor;
 pub mod ewc_debug;
-pub mod seat;
 pub mod shm;
 pub mod xdg_shell;
 

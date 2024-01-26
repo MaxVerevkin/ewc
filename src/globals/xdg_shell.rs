@@ -345,7 +345,8 @@ fn xdg_toplevel_cb(ctx: RequestCtx<XdgToplevel>) -> io::Result<()> {
                 .unwrap();
             ctx.state
                 .seat
-                .ptr_start_move(&mut ctx.state.focus_stack, Some(toplevel_i));
+                .pointer
+                .start_move(&mut ctx.state.focus_stack, Some(toplevel_i));
         }
         Request::Resize(args) => {
             let toplevel_i = ctx
@@ -355,7 +356,7 @@ fn xdg_toplevel_cb(ctx: RequestCtx<XdgToplevel>) -> io::Result<()> {
                 .iter()
                 .position(|x| x.upgrade().unwrap().wl == ctx.proxy)
                 .unwrap();
-            ctx.state.seat.ptr_start_resize(
+            ctx.state.seat.pointer.start_resize(
                 &mut ctx.state.focus_stack,
                 args.edges,
                 Some(toplevel_i),

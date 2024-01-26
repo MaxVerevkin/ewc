@@ -7,9 +7,9 @@ use std::os::unix::net::UnixStream;
 use std::rc::Rc;
 
 use crate::globals::compositor::Compositor;
-use crate::globals::seat::ClientSeat;
 use crate::globals::shm::Shm;
 use crate::protocol::*;
+use crate::seat::ClientSeat;
 use crate::wayland_core::*;
 use crate::{State, ToFlushSet};
 
