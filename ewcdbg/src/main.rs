@@ -5,7 +5,7 @@ use wayrs_client::{global::GlobalsExt, Connection, IoMode};
 wayrs_client::generate!("../protocol/ewc-debug.xml");
 use ewc_debug_v1::Interest;
 
-const INTERESTS: &[(&'static str, &'static str, ewc_debug_v1::Interest)] = &[
+const INTERESTS: &[(&str, &str, ewc_debug_v1::Interest)] = &[
     ("frame", "frame timings", Interest::FrameStat),
     ("message", "arbitrary debug messages", Interest::Messages),
 ];
