@@ -33,14 +33,14 @@ use crate::protocol::xdg_toplevel::ResizeEdge;
 use crate::protocol::*;
 use crate::wayland_core::*;
 
-// #[macro_export]
-// macro_rules! debug {
-//     ($state:expr, $($fmt:tt)*) => {
-//         if !$state.debuggers.is_empty() {
-//             $state.debug(&format!($($fmt)*));
-//         }
-//     };
-// }
+#[macro_export]
+macro_rules! debug {
+    ($debugger:expr, $($fmt:tt)*) => {
+        if $debugger.accum_interest().contains(crate::protocol::ewc_debug_v1::Interest::Messages) {
+            $debugger.message(&format!($($fmt)*));
+        }
+    };
+}
 
 pub struct Server {
     socket: UnixListener,
@@ -226,6 +226,7 @@ impl Server {
             match event {
                 BackendEvent::ShutDown => return Err(io::Error::other("backend shutdown")),
                 BackendEvent::Frame => {
+                    debug!(self.state.debugger, "got a frame event!");
                     let t = std::time::Instant::now();
                     self.state.backend.render_frame(&mut |frame| {
                         frame.clear(0.2, 0.1, 0.2);

@@ -47,5 +47,9 @@
     <event name="frame_stat">
       <arg name="rendering_duration" type="uint" summary="duration is nanoseconds"/>
     </event>
+
+    <event name="massage">
+      <arg name="message" type="string" summary="a debug message"/>
+    </event>
   </interface>
 </protocol>

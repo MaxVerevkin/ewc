@@ -2,24 +2,33 @@ use std::time::Duration;
 
 use wayrs_client::{global::GlobalsExt, Connection, IoMode};
 
-wayrs_client::generate!("../src/protocol/ewc-debug-v1.xml");
+wayrs_client::generate!("../src/protocol/ewc-debug.xml");
+use ewc_debug_v1::Interest;
+
+const INTERESTS: &[(&'static str, &'static str, ewc_debug_v1::Interest)] = &[
+    ("frame", "frame timings", Interest::FrameStat),
+    ("message", "arbitrary debug messages", Interest::Messages),
+];
 
 fn usage() -> ! {
     println!("Usage: ewcdbg interest1 [interest2 [...]]");
     println!("Possible interests");
-    println!("  frame - display frame timings");
+    for (interest, desc, _) in INTERESTS {
+        println!("  {interest} - {desc}");
+    }
     std::process::exit(1);
 }
 
 fn main() {
-    let mut interest = ewc_debug_v1::Interest::None;
+    let mut interest = Interest::None;
     for arg in std::env::args().skip(1) {
-        match arg.as_str() {
-            "frame" => interest |= ewc_debug_v1::Interest::FrameStat,
-            _other => usage(),
+        if let Some((_, _, i)) = INTERESTS.iter().find(|i| i.0 == arg) {
+            interest |= *i;
+        } else {
+            usage();
         }
     }
-    if interest == ewc_debug_v1::Interest::None {
+    if interest == Interest::None {
         usage();
     }
 
@@ -32,6 +41,9 @@ fn main() {
             Event::FrameStat(nanos) => {
                 let dur = Duration::from_nanos(nanos as u64);
                 println!("frame composed in {dur:?}");
+            }
+            Event::Massage(msg) => {
+                println!("msg: {}", msg.to_str().unwrap());
             }
         }
     });
