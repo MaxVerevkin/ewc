@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Get required packages
-        run: sudo apt-get update && sudo apt-get install libxkbcommon-dev libseat-dev
+        run: sudo apt-get update && sudo apt-get install libxkbcommon-dev libseat-dev libinput-dev
       - uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Get required packages
-        run: sudo apt-get update && sudo apt-get install libxkbcommon-dev libseat-dev
+        run: sudo apt-get update && sudo apt-get install libxkbcommon-dev libseat-dev libinput-dev
       - uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Get required packages
-        run: sudo apt-get update && sudo apt-get install fd-find libxkbcommon-dev libseat-dev
+        run: sudo apt-get update && sudo apt-get install fd-find libxkbcommon-dev libseat-dev libinput-dev
       - uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -49,7 +49,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Get required packages
-        run: sudo apt-get update && sudo apt-get install libxkbcommon-dev libseat-dev
+        run: sudo apt-get update && sudo apt-get install libxkbcommon-dev libseat-dev libinput-dev
       - uses: actions/checkout@v4
         with:
           submodules: recursive
