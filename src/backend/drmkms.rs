@@ -5,8 +5,9 @@ use std::path::Path;
 use std::rc::Rc;
 
 use drm::buffer::{Buffer as _, DrmFourcc};
+use drm::control::atomic::AtomicModeReq;
 use drm::control::dumbbuffer::DumbBuffer;
-use drm::control::{AtomicCommitFlags, Device as _, PageFlipFlags};
+use drm::control::{AtomicCommitFlags, Device as _};
 use drm::Device as _;
 use input::event::keyboard::KeyboardEventTrait;
 use input::Libinput;
@@ -123,7 +124,7 @@ pub fn new() -> Option<Box<dyn Backend>> {
         .as_hashmap(&card)
         .expect("Could not get a prop from plane");
 
-    let mut atomic_req = drm::control::atomic::AtomicModeReq::new();
+    let mut atomic_req = AtomicModeReq::new();
     atomic_req.add_property(
         con.handle(),
         con_props["CRTC_ID"].handle(),
@@ -204,7 +205,6 @@ pub fn new() -> Option<Box<dyn Backend>> {
         temp_buf: vec![0u8; disp_width as usize * disp_height as usize * 4],
         fb_front: fb,
         fb_back: fb2,
-        crtc: crtc.handle(),
         atomic_req,
         plane,
         plane_props,
@@ -223,8 +223,7 @@ struct BackendImp {
     temp_buf: Vec<u8>,
     fb_front: drm::control::framebuffer::Handle,
     fb_back: drm::control::framebuffer::Handle,
-    crtc: drm::control::crtc::Handle,
-    atomic_req: drm::control::atomic::AtomicModeReq,
+    atomic_req: AtomicModeReq,
     plane: drm::control::plane::Handle,
     plane_props: HashMap<String, drm::control::property::Info>,
     backend_events_queue: VecDeque<BackendEvent>,
@@ -318,8 +317,8 @@ impl Backend for BackendImp {
                 while let Some(seat_event) = self.seat.next_event() {
                     match seat_event {
                         libseat::Event::Enable => {
+                            eprintln!("seat enabled");
                             if self.suspended {
-                                eprintln!("seat enabled");
                                 self.atomic_req.add_property(
                                     self.plane,
                                     self.plane_props["FB_ID"].handle(),
@@ -489,15 +488,26 @@ impl Backend for BackendImp {
 
         // Reading from mapped buffer is terribly slow, but required for blending.
         // When blending is involved, rendering to a CPU buffer and then copying is much faster.
-        let mut map = self
-            .card
-            .map_dumb_buffer(&mut self.buf_back)
-            .expect("Could not map dumbbuffer");
-        map.copy_from_slice(&self.temp_buf);
+        {
+            let mut map = self
+                .card
+                .map_dumb_buffer(&mut self.buf_back)
+                .expect("Could not map dumbbuffer");
+            map.copy_from_slice(&self.temp_buf);
+        }
 
-        self.card
-            .page_flip(self.crtc, self.fb_back, PageFlipFlags::EVENT, None)
-            .unwrap();
+        let mut atomic_req = AtomicModeReq::new();
+        atomic_req.add_property(
+            self.plane,
+            self.plane_props["FB_ID"].handle(),
+            drm::control::property::Value::Framebuffer(Some(self.fb_back)),
+        );
+        if let Err(e) = self.card.atomic_commit(
+            AtomicCommitFlags::PAGE_FLIP_EVENT | AtomicCommitFlags::NONBLOCK,
+            atomic_req,
+        ) {
+            eprintln!("drmkms: atomic nonblock page flip failed: {e:?}");
+        };
     }
 }
 
