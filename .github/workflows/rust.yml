@@ -8,15 +8,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Get required packages
-        run: sudo apt-get update && sudo apt-get install libxkbcommon-dev libseat-dev libinput-dev
+        run: sudo apt-get update && sudo apt-get install libxkbcommon-dev libseat-dev seatd libinput-dev
       - uses: actions/checkout@v4
         with:
           submodules: recursive
       - uses: dtolnay/rust-toolchain@stable
       - name: Check
         run: cargo check --all --all-features
-        env:
-          PKG_CONFIG_PATH: /usr/lib/x86_64-linux-gnu/pkgconfig
 
   test:
     name: Test Suite
