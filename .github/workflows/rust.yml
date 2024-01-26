@@ -1,0 +1,60 @@
+on: [push, pull_request]
+
+name: Rust
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      # - name: Get required packages
+      #   run: sudo apt-get update && sudo apt-get install libxkbcommon-dev libdrm-dev libegl-dev
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check
+        run: cargo check --all --all-features
+
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      # - name: Get required packages
+      #   run: sudo apt-get update && sudo apt-get install libxkbcommon-dev libdrm-dev libegl-dev
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Tests
+        run: cargo test --all --all-features
+
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      # - name: Get required packages
+      #   run: sudo apt-get update && sudo apt-get install fd-find libxkbcommon-dev libdrm-dev libegl-dev
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Fmt check
+        run: rustfmt --check --edition 2021 $(fdfind -e rs)
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      # - name: Get required packages
+      #   run: sudo apt-get update && sudo apt-get install libxkbcommon-dev libdrm-dev libegl-dev
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Clippy check
+        run: cargo clippy --all --all-features -- -D warnings -A unknown-lints
