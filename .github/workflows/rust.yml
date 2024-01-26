@@ -6,22 +6,26 @@ jobs:
   check:
     name: Check
     runs-on: ubuntu-latest
+    container:
+      image: archlinux
     steps:
       - name: Get required packages
-        run: sudo apt-get update && sudo apt-get install libxkbcommon-dev libseat-dev seatd libinput-dev
+        run: pacman --noconfirm --noprogressbar -Syu git gcc pkgconf libxkbcommon seatd libinput
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@nightly
       - name: Check
         run: cargo check --all --all-features
 
   test:
     name: Test Suite
     runs-on: ubuntu-latest
+    container:
+      image: archlinux
     steps:
       - name: Get required packages
-        run: sudo apt-get update && sudo apt-get install libxkbcommon-dev libseat-dev libinput-dev
+        run: pacman --noconfirm --noprogressbar -Syu git gcc pkgconf libxkbcommon seatd libinput
       - uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -32,9 +36,11 @@ jobs:
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest
+    container:
+      image: archlinux
     steps:
       - name: Get required packages
-        run: sudo apt-get update && sudo apt-get install fd-find libxkbcommon-dev libseat-dev libinput-dev
+        run: pacman --noconfirm --noprogressbar -Syu fd git gcc pkgconf libxkbcommon seatd libinput
       - uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -42,14 +48,16 @@ jobs:
         with:
           components: rustfmt
       - name: Fmt check
-        run: rustfmt --check --edition 2021 $(fdfind -e rs)
+        run: rustfmt --check --edition 2021 $(fd -e rs)
 
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
+    container:
+      image: archlinux
     steps:
       - name: Get required packages
-        run: sudo apt-get update && sudo apt-get install libxkbcommon-dev libseat-dev libinput-dev
+        run: pacman --noconfirm --noprogressbar -Syu git gcc pkgconf libxkbcommon seatd libinput
       - uses: actions/checkout@v4
         with:
           submodules: recursive
