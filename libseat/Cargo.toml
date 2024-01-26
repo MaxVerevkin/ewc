@@ -1,15 +1,15 @@
 [package]
 name = "libseat"
 description = "Safe libseat bindings"
-version = "0.2.1"
-authors = ["Poly <marynczak.bartlomiej@gmail.com>"]
-edition = "2018"
+version = "0.1.0"
+authors = [
+  "Poly <marynczak.bartlomiej@gmail.com>",
+  "MaxVerevkin <maxxverrr@gmail.com>",
+]
+edition = "2021"
 
 keywords = ["libseat"]
 license = "MIT"
-repository = "https://github.com/PolyMeilex/libseat-rs"
-documentation = "https://docs.rs/libseat"
 
 [dependencies]
-errno = "0.3.1"
 libseat-sys = { version = "0.1.7" }
