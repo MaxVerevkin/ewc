@@ -271,10 +271,12 @@ impl Server {
                                     0.5,
                                     0.5,
                                     1.0,
-                                    self.state.seat.pointer.x.round() as i32,
-                                    self.state.seat.pointer.y.round() as i32,
-                                    10,
-                                    10,
+                                    pixman::Rectangle32 {
+                                        x: self.state.seat.pointer.x.round() as i32,
+                                        y: self.state.seat.pointer.y.round() as i32,
+                                        width: 10,
+                                        height: 10,
+                                    },
                                 );
                             }
                         }

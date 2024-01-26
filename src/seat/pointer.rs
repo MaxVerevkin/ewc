@@ -61,7 +61,7 @@ impl Pointer {
         wl_pointer.set_callback(wl_pointer_cb);
         if let Some(focused) = self.get_focused_surface() {
             if focused.client_id() == wl_pointer.client_id() {
-                self.enter(&wl_pointer);
+                self.enter(wl_pointer);
             }
         }
     }

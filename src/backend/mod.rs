@@ -19,12 +19,7 @@ pub trait Backend {
     fn shm_pool_resource_destroyed(&mut self, pool_id: ShmPoolId);
     fn create_shm_buffer(
         &mut self,
-        pool_id: ShmPoolId,
-        offset: usize,
-        wl_format: u32,
-        width: u32,
-        height: u32,
-        stide: u32,
+        spec: ShmBufferSpec,
         resource: crate::protocol::WlBuffer,
     ) -> BufferId;
     fn get_buffer_size(&self, buffer_id: BufferId) -> (u32, u32);
@@ -32,6 +27,15 @@ pub trait Backend {
     fn buffer_unlock(&mut self, buffer_id: BufferId);
     fn buffer_resource_destroyed(&mut self, buffer_id: BufferId);
     fn render_frame(&mut self, f: &mut dyn FnMut(&mut dyn Frame));
+}
+
+pub struct ShmBufferSpec {
+    pub pool_id: ShmPoolId,
+    pub offset: u32,
+    pub width: u32,
+    pub height: u32,
+    pub stride: u32,
+    pub wl_format: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -56,7 +60,7 @@ pub trait Frame {
         x: i32,
         y: i32,
     );
-    fn render_rect(&mut self, r: f32, g: f32, b: f32, a: f32, x: i32, y: i32, w: u32, h: u32);
+    fn render_rect(&mut self, r: f32, g: f32, b: f32, a: f32, rect: pixman::Rectangle32);
 }
 
 pub enum BackendEvent {

@@ -17,12 +17,7 @@ pub struct ShmPool {
 }
 
 pub struct ShmBuffer {
-    pool_id: ShmPoolId,
-    offset: usize,
-    width: u32,
-    height: u32,
-    stride: u32,
-    wl_format: u32,
+    spec: ShmBufferSpec,
     locks: u32,
     resource: Option<crate::protocol::WlBuffer>,
 }
@@ -69,24 +64,14 @@ impl RendererState {
 
     pub fn create_shm_buffer(
         &mut self,
-        pool_id: ShmPoolId,
-        offset: usize,
-        wl_format: u32,
-        width: u32,
-        height: u32,
-        stride: u32,
+        spec: ShmBufferSpec,
         resource: crate::protocol::WlBuffer,
     ) -> BufferId {
         let id = BufferId(next_id(&mut self.next_buffer_id));
         self.shm_buffers.insert(
             id,
             ShmBuffer {
-                pool_id,
-                offset,
-                width,
-                height,
-                stride,
-                wl_format,
+                spec,
                 resource: Some(resource),
                 locks: 0,
             },
@@ -95,8 +80,8 @@ impl RendererState {
     }
 
     pub fn get_buffer_size(&self, buffer_id: BufferId) -> (u32, u32) {
-        let buf = &self.shm_buffers[&buffer_id];
-        (buf.width, buf.height)
+        let spec = &self.shm_buffers[&buffer_id].spec;
+        (spec.width, spec.height)
     }
 
     pub fn buffer_lock(&mut self, buffer_id: BufferId) {
@@ -128,7 +113,12 @@ impl RendererState {
 
     fn consider_dropping_shm_pool(&mut self, pool_id: ShmPoolId) {
         let shm_pool = self.shm_pools.get(&pool_id).unwrap();
-        if !shm_pool.resource_alive && self.shm_buffers.values().all(|buf| buf.pool_id != pool_id) {
+        if !shm_pool.resource_alive
+            && self
+                .shm_buffers
+                .values()
+                .all(|buf| buf.spec.pool_id != pool_id)
+        {
             self.shm_pools.remove(&pool_id);
         }
     }
@@ -137,7 +127,7 @@ impl RendererState {
         let buffer = self.shm_buffers.remove(&buffer_id).unwrap();
         assert_eq!(buffer.locks, 0);
         assert!(buffer.resource.is_none());
-        self.consider_dropping_shm_pool(buffer.pool_id);
+        self.consider_dropping_shm_pool(buffer.spec.pool_id);
     }
 }
 
@@ -188,15 +178,6 @@ impl Renderer<'_> {
 
     pub fn render_buffer(
         &mut self,
-        // bytes: &[u8],
-        // wl_format: u32,
-        // width: u32,
-        // height: u32,
-        // stride: u32,
-        // opaque_region: Option<&pixman::Region32>,
-        // alpha: f32,
-        // x: i32,
-        // y: i32,
         buf: BufferId,
         opaque_region: Option<&pixman::Region32>,
         alpha: f32,
@@ -204,18 +185,20 @@ impl Renderer<'_> {
         y: i32,
     ) {
         let buf = &self.state.shm_buffers[&buf];
-        let pool = &self.state.shm_pools[&buf.pool_id];
-        let bytes = &pool.memmap[buf.offset..][..buf.stride as usize * buf.height as usize];
-        let wl_format = buf.wl_format;
+        let pool = &self.state.shm_pools[&buf.spec.pool_id];
+        let spec = &buf.spec;
+        let bytes =
+            &pool.memmap[spec.offset as usize..][..spec.stride as usize * spec.height as usize];
+        let wl_format = spec.wl_format;
 
         // eprintln!("render_buffer at {x},{y}");
         let src = unsafe {
             pixman::Image::from_raw_mut(
                 wl_format_to_pixman(wl_format).unwrap(),
-                buf.width as usize,
-                buf.height as usize,
+                spec.width as usize,
+                spec.height as usize,
                 bytes.as_ptr().cast_mut().cast(),
-                buf.stride as usize,
+                spec.stride as usize,
                 false,
             )
             .unwrap()
@@ -224,8 +207,8 @@ impl Renderer<'_> {
         let buf_rect = pixman::Box32 {
             x1: 0,
             y1: 0,
-            x2: buf.width as i32,
-            y2: buf.height as i32,
+            x2: spec.width as i32,
+            y2: spec.height as i32,
         };
         let op = if opaque_region.is_some_and(|reg| {
             reg.contains_rectangle(buf_rect) == pixman::Overlap::In && alpha == 1.0
@@ -246,19 +229,26 @@ impl Renderer<'_> {
             (0, 0),
             (0, 0),
             (x, y),
-            (buf.width as i32, buf.height as i32),
+            (spec.width as i32, spec.height as i32),
         );
     }
 
-    pub fn render_rect(&mut self, r: f32, g: f32, b: f32, a: f32, x: i32, y: i32, w: u32, h: u32) {
+    pub fn render_rect(&mut self, r: f32, g: f32, b: f32, a: f32, rect: pixman::Rectangle32) {
         let op = if a == 1.0 {
             pixman::Operation::Src
         } else {
             pixman::Operation::Over
         };
         let src = pixman::Solid::new(pixman::Color::from_f32(r, g, b, a)).unwrap();
-        self.image
-            .composite32(op, &src, None, (0, 0), (0, 0), (x, y), (w as i32, h as i32));
+        self.image.composite32(
+            op,
+            &src,
+            None,
+            (0, 0),
+            (0, 0),
+            (rect.x, rect.y),
+            (rect.width as i32, rect.height as i32),
+        );
     }
 }
 

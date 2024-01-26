@@ -449,16 +449,10 @@ impl Backend for BackendImp {
 
     fn create_shm_buffer(
         &mut self,
-        pool_id: ShmPoolId,
-        offset: usize,
-        wl_format: u32,
-        width: u32,
-        height: u32,
-        stride: u32,
+        spec: ShmBufferSpec,
         resource: crate::protocol::WlBuffer,
     ) -> BufferId {
-        self.renderer_state
-            .create_shm_buffer(pool_id, offset, wl_format, width, height, stride, resource)
+        self.renderer_state.create_shm_buffer(spec, resource)
     }
 
     fn get_buffer_size(&self, buffer_id: BufferId) -> (u32, u32) {
@@ -564,7 +558,7 @@ impl Frame for FrameImp<'_> {
         self.renderer.render_buffer(buf, opaque_region, alpha, x, y);
     }
 
-    fn render_rect(&mut self, r: f32, g: f32, b: f32, a: f32, x: i32, y: i32, w: u32, h: u32) {
-        self.renderer.render_rect(r, g, b, a, x, y, w, h);
+    fn render_rect(&mut self, r: f32, g: f32, b: f32, a: f32, rect: pixman::Rectangle32) {
+        self.renderer.render_rect(r, g, b, a, rect);
     }
 }

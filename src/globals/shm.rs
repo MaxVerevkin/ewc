@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io;
 
 use super::IsGlobal;
-use crate::backend::{BufferId, ShmPoolId};
+use crate::backend::{BufferId, ShmBufferSpec, ShmPoolId};
 use crate::client::RequestCtx;
 use crate::protocol::*;
 use crate::wayland_core::{ObjectId, Proxy};
@@ -64,12 +64,14 @@ fn wl_shm_pool_cb(ctx: RequestCtx<WlShmPool>) -> io::Result<()> {
             args.id.set_callback(wl_buffer_cb);
             let pool_id = ctx.client.shm.wl_id_to_shm_id[&ctx.proxy.id()];
             let buffer_id = ctx.state.backend.create_shm_buffer(
-                pool_id,
-                args.offset as usize,
-                args.format as u32,
-                args.width as u32,
-                args.height as u32,
-                args.stride as u32,
+                ShmBufferSpec {
+                    pool_id,
+                    offset: args.offset as u32,
+                    width: args.width as u32,
+                    height: args.height as u32,
+                    stride: args.stride as u32,
+                    wl_format: args.format as u32,
+                },
                 args.id.clone(),
             );
             ctx.client
