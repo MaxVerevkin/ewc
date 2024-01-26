@@ -10,7 +10,7 @@ jobs:
       image: archlinux
     steps:
       - name: Get required packages
-        run: pacman --noconfirm --noprogressbar -Syu git gcc pkgconf libxkbcommon seatd libinput
+        run: pacman --noconfirm --noprogressbar -Syu git gcc pkgconf libxkbcommon seatd libinput pixman
       - uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -25,7 +25,7 @@ jobs:
       image: archlinux
     steps:
       - name: Get required packages
-        run: pacman --noconfirm --noprogressbar -Syu git gcc pkgconf libxkbcommon seatd libinput
+        run: pacman --noconfirm --noprogressbar -Syu git gcc pkgconf libxkbcommon seatd libinput pixman
       - uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -40,7 +40,7 @@ jobs:
       image: archlinux
     steps:
       - name: Get required packages
-        run: pacman --noconfirm --noprogressbar -Syu fd git gcc pkgconf libxkbcommon seatd libinput
+        run: pacman --noconfirm --noprogressbar -Syu fd git gcc pkgconf libxkbcommon seatd libinput pixman
       - uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -57,7 +57,7 @@ jobs:
       image: archlinux
     steps:
       - name: Get required packages
-        run: pacman --noconfirm --noprogressbar -Syu git gcc pkgconf libxkbcommon seatd libinput
+        run: pacman --noconfirm --noprogressbar -Syu git gcc pkgconf libxkbcommon seatd libinput pixman
       - uses: actions/checkout@v4
         with:
           submodules: recursive
