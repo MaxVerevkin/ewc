@@ -11,7 +11,6 @@ use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use globals::ewc_debug::Debugger;
 use xkbcommon::xkb;
 
 mod backend;
@@ -28,6 +27,7 @@ use crate::client::{Client, ClientId};
 use crate::event_loop::EventLoop;
 use crate::focus_stack::FocusStack;
 use crate::globals::compositor::{Compositor, Surface};
+use crate::globals::ewc_debug::Debugger;
 use crate::globals::Global;
 use crate::protocol::xdg_toplevel::ResizeEdge;
 use crate::protocol::*;
@@ -87,6 +87,7 @@ fn choose_backend() -> Box<dyn Backend> {
 impl Server {
     pub fn destroy_client(&mut self, client_id: ClientId) {
         eprintln!("destroying client");
+        self.state.seat.remove_client(client_id);
         self.state.focus_stack.remove_client(client_id);
         self.state.debugger.remove_client(client_id);
         let client = self.clients.remove(&client_id).unwrap();
@@ -120,7 +121,7 @@ impl Server {
                     Global::new::<WlSubcompositor>(2, 1),
                     Global::new::<WlShm>(3, 1),
                     Global::new::<XdgWmBase>(4, 3),
-                    Global::new::<WlDataDeviceManager>(5, 3),
+                    Seat::data_device_manager_global(5),
                     Seat::global(6),
                     Global::new::<WlOutput>(7, 2),
                     Global::new::<EwcDebugV1>(8, 1),
@@ -302,7 +303,7 @@ impl Server {
                             .switch_vt(keysym.raw() - xkb::Keysym::XF86_Switch_VT_1.raw() + 1);
                     } else {
                         if let Some(toplevel) = self.state.focus_stack.top() {
-                            self.state.seat.keyboard.focus_surface(Some(
+                            self.state.seat.kbd_focus_surface(Some(
                                 toplevel.wl_surface.upgrade().unwrap().wl.clone(),
                             ));
                         }
@@ -311,10 +312,9 @@ impl Server {
                 }
                 BackendEvent::KeyReleased(_id, key) => {
                     if let Some(toplevel) = self.state.focus_stack.top() {
-                        self.state
-                            .seat
-                            .keyboard
-                            .focus_surface(Some(toplevel.wl_surface.upgrade().unwrap().wl.clone()));
+                        self.state.seat.kbd_focus_surface(Some(
+                            toplevel.wl_surface.upgrade().unwrap().wl.clone(),
+                        ));
                     }
                     self.state.seat.keyboard.update_key(key, false);
                 }

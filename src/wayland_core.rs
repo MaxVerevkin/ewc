@@ -320,9 +320,7 @@ impl Object {
 
     pub fn destroy(&self) {
         self.inner.state.set(ObjectState::Dead);
-        if self.id().created_by_client() {
-            self.conn().get_display().delete_id(self.id().as_u32());
-        }
+        self.conn().reuse_id(self.id());
     }
 
     pub fn set_callback(&self, callback: ResourceCallback) {
@@ -398,6 +396,8 @@ impl Debug for Object {
 pub struct ObjectStorage {
     clients: Vec<Object>,
     servers: Vec<Object>,
+    free_server_ids: Vec<ObjectId>,
+    next_server_id: ObjectId,
 }
 
 impl ObjectStorage {
@@ -408,6 +408,8 @@ impl ObjectStorage {
             Self {
                 clients: vec![display],
                 servers: Vec::new(),
+                free_server_ids: Vec::new(),
+                next_server_id: ObjectId::MIN_SERVER,
             },
         )
     }
@@ -443,6 +445,45 @@ impl ObjectStorage {
         }
 
         Ok(())
+    }
+
+    pub fn create_servers(
+        &mut self,
+        conn: &Rc<Connection>,
+        interface: &'static Interface,
+        version: u32,
+    ) -> io::Result<Object> {
+        let id = match self.free_server_ids.pop() {
+            Some(id) => id,
+            None => {
+                let id = self.next_server_id;
+                self.next_server_id.0 = self
+                    .next_server_id
+                    .0
+                    .checked_add(1)
+                    .ok_or_else(|| io::Error::other("run out of server-side object ids"))?;
+                id
+            }
+        };
+
+        if id.as_index() > self.servers.len() {
+            unreachable!();
+        }
+
+        let object = Object::new(conn, id, interface, version);
+
+        if let Some(slot) = self.servers.get_mut(id.as_index()) {
+            *slot = object.clone();
+        } else if object.id().as_index() == self.servers.len() {
+            self.servers.push(object.clone());
+        }
+
+        Ok(object)
+    }
+
+    pub fn reuse_servers_id(&mut self, id: ObjectId) {
+        assert!(id.created_by_server());
+        self.free_server_ids.push(id);
     }
 }
 

@@ -85,20 +85,3 @@ impl Global {
 }
 
 impl IsGlobal for WlOutput {}
-impl IsGlobal for WlDataDeviceManager {
-    fn on_bind(&self, _client: &mut Client, _state: &mut State) {
-        self.set_callback(|ctx| {
-            use wl_data_device_manager::Request;
-            match ctx.request {
-                Request::CreateDataSource(_) => {
-                    todo!();
-                    //
-                }
-                Request::GetDataDevice(args) => {
-                    args.id.set_callback(|_ctx| Ok(()));
-                }
-            }
-            Ok(())
-        })
-    }
-}

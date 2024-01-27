@@ -53,7 +53,7 @@ impl Connection {
                 events_queue: RefCell::new(VecDeque::new()),
                 resources: RefCell::new(resources),
                 wl_display,
-                seat: ClientSeat::new(),
+                seat: ClientSeat::default(),
             }
         })
     }
@@ -85,6 +85,21 @@ impl Connection {
 
     pub fn register_clients_object(&self, object: Object) -> io::Result<()> {
         self.resources.borrow_mut().register_clients(object)
+    }
+
+    pub fn create_servers_object<P: Proxy>(self: &Rc<Self>, version: u32) -> io::Result<P> {
+        self.resources
+            .borrow_mut()
+            .create_servers(self, P::INTERFACE, version)
+            .map(|x| x.try_into().unwrap())
+    }
+
+    pub fn reuse_id(&self, id: ObjectId) {
+        if id.created_by_client() {
+            self.wl_display.delete_id(id.as_u32());
+        } else {
+            self.resources.borrow_mut().reuse_servers_id(id);
+        }
     }
 
     pub fn get_object(&self, id: ObjectId) -> Option<Object> {

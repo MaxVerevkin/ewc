@@ -14,7 +14,7 @@ pub struct Keyboard {
     keymap_file_size: u32,
     pub xkb_state: xkb::State,
     mods: ModsState,
-    focused_surface: Option<WlSurface>,
+    pub(super) focused_surface: Option<WlSurface>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,7 +89,9 @@ impl Keyboard {
             self.keymap_file.as_fd().try_clone_to_owned()?,
             self.keymap_file_size,
         );
-        wl_keyboard.repeat_info(40, 300);
+        if wl_keyboard.version() >= 4 {
+            wl_keyboard.repeat_info(40, 300);
+        }
         if let Some(surf) = &self.focused_surface {
             if surf.client_id() == wl_keyboard.client_id() {
                 self.enter(wl_keyboard);
@@ -98,7 +100,7 @@ impl Keyboard {
         Ok(())
     }
 
-    pub fn focus_surface(&mut self, surface: Option<WlSurface>) {
+    pub(super) fn focus_surface(&mut self, surface: Option<WlSurface>) {
         if self.focused_surface == surface {
             return;
         }
