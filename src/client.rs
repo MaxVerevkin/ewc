@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::num::NonZeroU64;
 use std::os::fd::{AsRawFd, RawFd};
@@ -9,7 +9,7 @@ use std::rc::Rc;
 use crate::globals::compositor::Compositor;
 use crate::globals::shm::Shm;
 use crate::protocol::*;
-use crate::seat::ClientSeat;
+use crate::seat::{ClientSeat, DataSource};
 use crate::wayland_core::*;
 use crate::{State, ToFlushSet};
 
@@ -143,6 +143,7 @@ pub struct Client {
     registries: Vec<WlRegistry>,
     pub compositor: Compositor,
     pub shm: Shm,
+    pub data_sources: HashMap<ObjectId, DataSource>,
 }
 
 impl Client {
@@ -154,6 +155,7 @@ impl Client {
             registries: Vec::new(),
             compositor: Compositor::new(),
             shm: Shm::new(),
+            data_sources: HashMap::new(),
         }
     }
 

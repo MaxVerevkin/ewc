@@ -23,7 +23,6 @@ pub struct ClientSeat {
     pub keyboards: RefCell<Vec<WlKeyboard>>,
     pub pointers: RefCell<Vec<WlPointer>>,
     pub data_devices: RefCell<Vec<WlDataDevice>>,
-    pub data_sources: RefCell<HashMap<ObjectId, DataSource>>, // source id -> source
     pub data_offers: RefCell<HashMap<ObjectId, WlDataSource>>, // offer id -> source
 }
 
@@ -154,7 +153,7 @@ impl IsGlobal for WlDataDeviceManager {
             match ctx.request {
                 Request::CreateDataSource(wl_data_source) => {
                     wl_data_source.set_callback(wl_data_source_cb);
-                    ctx.client.conn.seat.data_sources.borrow_mut().insert(
+                    ctx.client.data_sources.insert(
                         wl_data_source.id(),
                         DataSource {
                             wl: wl_data_source,
@@ -187,10 +186,7 @@ fn wl_data_source_cb(ctx: RequestCtx<WlDataSource>) -> io::Result<()> {
     match ctx.request {
         Request::Offer(mime) => {
             ctx.client
-                .conn
-                .seat
                 .data_sources
-                .borrow_mut()
                 .get_mut(&ctx.proxy.id())
                 .ok_or_else(|| io::Error::other("used data usource"))?
                 .mime
@@ -201,12 +197,7 @@ fn wl_data_source_cb(ctx: RequestCtx<WlDataSource>) -> io::Result<()> {
                 ctx.state.seat.selection = None;
                 ctx.state.seat.send_selection_to_focused();
             }
-            ctx.client
-                .conn
-                .seat
-                .data_sources
-                .borrow_mut()
-                .remove(&ctx.proxy.id());
+            ctx.client.data_sources.remove(&ctx.proxy.id());
         }
         Request::SetActions(_) => todo!(),
     }
@@ -226,10 +217,7 @@ fn wl_data_device_cb(ctx: RequestCtx<WlDataDevice>) -> io::Result<()> {
                 None => None,
                 Some(id) => Some(
                     ctx.client
-                        .conn
-                        .seat
                         .data_sources
-                        .borrow_mut()
                         .remove(&id)
                         .ok_or_else(|| io::Error::other("used data usource"))?,
                 ),
