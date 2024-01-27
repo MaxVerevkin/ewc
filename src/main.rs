@@ -456,18 +456,10 @@ fn main() {
 
 #[allow(dead_code)]
 fn print_client_surface_tree(client: &Client) {
-    fn subtree(client: &Client, indent: usize, root: Option<ObjectId>) {
+    fn subtree(client: &Client, indent: usize, root: Option<&Surface>) {
         match root {
             Some(root) => {
-                for sub in &client
-                    .compositor
-                    .surfaces
-                    .get(&root)
-                    .unwrap()
-                    .cur
-                    .borrow()
-                    .subsurfaces
-                {
+                for sub in &root.cur.borrow().subsurfaces {
                     eprint!(
                         "{} {:?}/{:?}",
                         " ".repeat(indent),
@@ -477,7 +469,7 @@ fn print_client_surface_tree(client: &Client) {
                     match sub.surface.cur.borrow().buffer {
                         Some((_buffer, w, h)) => {
                             eprintln!(" {},{} {w}x{h}", sub.position.0, sub.position.1,);
-                            subtree(client, indent + 4, Some(sub.surface.wl.id()));
+                            subtree(client, indent + 4, Some(&sub.surface));
                         }
                         None => {
                             eprintln!(" {},{} <not mapped>", sub.position.0, sub.position.1);
@@ -497,7 +489,7 @@ fn print_client_surface_tree(client: &Client) {
                     match s.cur.borrow().buffer {
                         Some((_buffer, w, h)) => {
                             eprintln!(" {w}x{h}");
-                            subtree(client, indent + 4, Some(s.wl.id()));
+                            subtree(client, indent + 4, Some(s));
                         }
                         None => eprintln!(" <not mapped>"),
                     }

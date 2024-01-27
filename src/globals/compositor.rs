@@ -9,17 +9,17 @@ use super::IsGlobal;
 use crate::backend::BufferId;
 use crate::client::RequestCtx;
 use crate::protocol::*;
-use crate::wayland_core::{ObjectId, Proxy};
+use crate::wayland_core::Proxy;
 use crate::State;
 use crate::{Client, Global};
 
 pub struct Compositor {
     pub next_configure_serial: Wrapping<u32>,
-    pub regions: HashMap<ObjectId, pixman::Region32>,
-    pub surfaces: HashMap<ObjectId, Rc<Surface>>,
-    pub subsurfaces: HashMap<ObjectId, Rc<SubsurfaceRole>>,
-    pub xdg_surfaces: HashMap<ObjectId, Rc<xdg_shell::XdgSurfaceRole>>,
-    pub xdg_toplevels: HashMap<ObjectId, Rc<xdg_shell::XdgToplevelRole>>,
+    pub regions: HashMap<WlRegion, pixman::Region32>,
+    pub surfaces: HashMap<WlSurface, Rc<Surface>>,
+    pub subsurfaces: HashMap<WlSubsurface, Rc<SubsurfaceRole>>,
+    pub xdg_surfaces: HashMap<XdgSurface, Rc<xdg_shell::XdgSurfaceRole>>,
+    pub xdg_toplevels: HashMap<XdgToplevel, Rc<xdg_shell::XdgToplevelRole>>,
 }
 
 impl Compositor {
@@ -221,14 +221,14 @@ impl IsGlobal for WlCompositor {
                     ctx.client
                         .compositor
                         .surfaces
-                        .insert(wl.id(), Rc::new(Surface::new(wl)));
+                        .insert(wl.clone(), Rc::new(Surface::new(wl)));
                 }
                 Request::CreateRegion(wl) => {
                     wl.set_callback(wl_region_cb);
                     ctx.client
                         .compositor
                         .regions
-                        .insert(wl.id(), pixman::Region32::default());
+                        .insert(wl, pixman::Region32::default());
                 }
             }
             Ok(())
@@ -244,18 +244,8 @@ impl IsGlobal for WlSubcompositor {
                 Request::Destroy => (),
                 Request::GetSubsurface(args) => {
                     args.id.set_callback(wl_subsurface_cb);
-                    let surface = ctx
-                        .client
-                        .compositor
-                        .surfaces
-                        .get(&args.surface)
-                        .ok_or_else(|| io::Error::other("invalid id in get_subsurface"))?;
-                    let parent = ctx
-                        .client
-                        .compositor
-                        .surfaces
-                        .get(&args.parent)
-                        .ok_or_else(|| io::Error::other("invalid id in get_subsurface"))?;
+                    let surface = ctx.client.compositor.surfaces.get(&args.surface).unwrap();
+                    let parent = ctx.client.compositor.surfaces.get(&args.parent).unwrap();
                     if surface.has_role() {
                         return Err(io::Error::other("surface already has a role"));
                     }
@@ -270,7 +260,7 @@ impl IsGlobal for WlSubcompositor {
                     ctx.client
                         .compositor
                         .subsurfaces
-                        .insert(args.id.id(), subsurface);
+                        .insert(args.id, subsurface);
                     parent
                         .pending
                         .borrow_mut()
@@ -296,7 +286,7 @@ fn wl_surface_cb(ctx: RequestCtx<WlSurface>) -> io::Result<()> {
         .client
         .compositor
         .surfaces
-        .get(&(ctx.proxy.id()))
+        .get(&ctx.proxy)
         .unwrap()
         .clone();
 
@@ -318,9 +308,7 @@ fn wl_surface_cb(ctx: RequestCtx<WlSurface>) -> io::Result<()> {
             }
             assert_eq!(args.x, 0, "unimplemented");
             assert_eq!(args.y, 0, "unimplemented");
-            *surface.pending_buffer.borrow_mut() = args
-                .buffer
-                .map(|id| ctx.client.conn.get_object(id).unwrap().try_into().unwrap());
+            *surface.pending_buffer.borrow_mut() = args.buffer;
             surface
                 .pending
                 .borrow_mut()
@@ -338,14 +326,7 @@ fn wl_surface_cb(ctx: RequestCtx<WlSurface>) -> io::Result<()> {
         }
         Request::SetOpaqueRegion(reg_id) => {
             surface.pending.borrow_mut().opaque_region = match reg_id {
-                Some(reg_id) => Some(
-                    ctx.client
-                        .compositor
-                        .regions
-                        .get(&reg_id)
-                        .ok_or_else(|| io::Error::other("invalid region id"))?
-                        .clone(),
-                ),
+                Some(reg) => Some(ctx.client.compositor.regions.get(&reg).unwrap().clone()),
                 None => None,
             };
             surface
@@ -356,14 +337,7 @@ fn wl_surface_cb(ctx: RequestCtx<WlSurface>) -> io::Result<()> {
         }
         Request::SetInputRegion(reg_id) => {
             surface.pending.borrow_mut().input_region = match reg_id {
-                Some(reg_id) => Some(
-                    ctx.client
-                        .compositor
-                        .regions
-                        .get(&reg_id)
-                        .ok_or_else(|| io::Error::other("invalid region id"))?
-                        .clone(),
-                ),
+                Some(reg) => Some(ctx.client.compositor.regions.get(&reg).unwrap().clone()),
                 None => None,
             };
             surface
@@ -425,12 +399,7 @@ fn wl_surface_cb(ctx: RequestCtx<WlSurface>) -> io::Result<()> {
 }
 
 fn wl_subsurface_cb(ctx: RequestCtx<WlSubsurface>) -> io::Result<()> {
-    let subsurface = ctx
-        .client
-        .compositor
-        .subsurfaces
-        .get(&ctx.proxy.id())
-        .unwrap();
+    let subsurface = ctx.client.compositor.subsurfaces.get(&ctx.proxy).unwrap();
 
     use wl_subsurface::Request;
     match ctx.request {
@@ -440,7 +409,7 @@ fn wl_subsurface_cb(ctx: RequestCtx<WlSubsurface>) -> io::Result<()> {
                 .client
                 .compositor
                 .subsurfaces
-                .remove(&ctx.proxy.id())
+                .remove(&ctx.proxy)
                 .unwrap();
             if let Some(parent) = subsurface.parent.upgrade() {
                 parent
@@ -500,24 +469,14 @@ fn wl_region_cb(ctx: RequestCtx<WlRegion>) -> io::Result<()> {
     use wl_region::Request;
     match ctx.request {
         Request::Destroy => {
-            ctx.client.compositor.regions.remove(&ctx.proxy.id());
+            ctx.client.compositor.regions.remove(&ctx.proxy);
         }
         Request::Add(args) => {
-            let region = ctx
-                .client
-                .compositor
-                .regions
-                .get_mut(&ctx.proxy.id())
-                .unwrap();
+            let region = ctx.client.compositor.regions.get_mut(&ctx.proxy).unwrap();
             *region = region.union_rect(args.x, args.y, args.width as u32, args.height as u32);
         }
         Request::Subtract(args) => {
-            let region = ctx
-                .client
-                .compositor
-                .regions
-                .get_mut(&ctx.proxy.id())
-                .unwrap();
+            let region = ctx.client.compositor.regions.get_mut(&ctx.proxy).unwrap();
             let other =
                 pixman::Region32::init_rect(args.x, args.y, args.width as u32, args.height as u32);
             *region = region.subtract(&other);

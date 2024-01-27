@@ -170,9 +170,27 @@ fn gen_interface(mut iface: Interface) -> TokenStream {
                         Err(_) => return Err(crate::wayland_core::BadMessage),
                     }
                 },
-                ("new_id", _, Some(iface)) => {
+                ("new_id" | "object", _, Some(iface)) => {
                     let proxy_path = make_proxy_path(iface);
-                    quote!(#proxy_path::try_from(conn.get_object(#arg_name).unwrap()).unwrap())
+                    let map = quote!{
+                        match conn.get_object(#arg_name) {
+                            None => return Err(crate::wayland_core::BadMessage),
+                            Some(object) => match #proxy_path::try_from(object) {
+                                Err(_) => return Err(crate::wayland_core::BadMessage),
+                                Ok(val) => val,
+                            }
+                        }
+                    };
+                    if arg.allow_null {
+                        quote!{
+                            match #arg_name {
+                                Some(#arg_name) => Some(#map),
+                                None => None,
+                            }
+                        }
+                    } else {
+                        map
+                    }
                 }
                 _ => quote!(#arg_name),
             }
@@ -586,17 +604,15 @@ impl ArgExt for Argument {
             "int" => quote!(i32),
             "uint" => quote!(u32),
             "fixed" => quote!(crate::wayland_core::Fixed),
-            "object" => match self.allow_null {
-                false => quote!(ObjectId),
-                true => quote!(::std::option::Option<ObjectId>),
-            },
-            "new_id" => {
-                if let Some(iface) = &self.interface {
-                    make_proxy_path(iface)
-                } else {
-                    quote!(Object)
+            "new_id" | "object" => match (&self.interface, self.allow_null) {
+                (None, false) => quote!(Object),
+                (None, true) => quote!(Option<Object>),
+                (Some(iface), false) => make_proxy_path(iface),
+                (Some(iface), true) => {
+                    let proxy = make_proxy_path(iface);
+                    quote!(Option<#proxy>)
                 }
-            }
+            },
             "string" => match self.allow_null {
                 false => quote!(::std::ffi::CString),
                 true => quote!(::std::option::Option<::std::ffi::CString>),

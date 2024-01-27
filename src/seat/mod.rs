@@ -6,7 +6,7 @@ use std::io;
 use crate::client::{ClientId, RequestCtx};
 use crate::globals::{Global, IsGlobal};
 use crate::protocol::*;
-use crate::wayland_core::{ObjectId, Proxy};
+use crate::wayland_core::Proxy;
 use crate::{Client, State};
 
 mod keyboard;
@@ -23,7 +23,7 @@ pub struct ClientSeat {
     pub keyboards: RefCell<Vec<WlKeyboard>>,
     pub pointers: RefCell<Vec<WlPointer>>,
     pub data_devices: RefCell<Vec<WlDataDevice>>,
-    pub data_offers: RefCell<HashMap<ObjectId, WlDataSource>>, // offer id -> source
+    pub data_offers: RefCell<HashMap<WlDataOffer, WlDataSource>>,
 }
 
 #[derive(Debug)]
@@ -106,7 +106,7 @@ impl Seat {
                     .seat
                     .data_offers
                     .borrow_mut()
-                    .insert(data_offer.id(), selection.wl.clone());
+                    .insert(data_offer.clone(), selection.wl.clone());
                 data_device.data_offer(&data_offer);
                 for mime in &selection.mime {
                     data_offer.offer(mime.clone());
@@ -154,7 +154,7 @@ impl IsGlobal for WlDataDeviceManager {
                 Request::CreateDataSource(wl_data_source) => {
                     wl_data_source.set_callback(wl_data_source_cb);
                     ctx.client.data_sources.insert(
-                        wl_data_source.id(),
+                        wl_data_source.clone(),
                         DataSource {
                             wl: wl_data_source,
                             mime: Vec::new(),
@@ -187,7 +187,7 @@ fn wl_data_source_cb(ctx: RequestCtx<WlDataSource>) -> io::Result<()> {
         Request::Offer(mime) => {
             ctx.client
                 .data_sources
-                .get_mut(&ctx.proxy.id())
+                .get_mut(&ctx.proxy)
                 .ok_or_else(|| io::Error::other("used data usource"))?
                 .mime
                 .push(mime);
@@ -197,7 +197,7 @@ fn wl_data_source_cb(ctx: RequestCtx<WlDataSource>) -> io::Result<()> {
                 ctx.state.seat.selection = None;
                 ctx.state.seat.send_selection_to_focused();
             }
-            ctx.client.data_sources.remove(&ctx.proxy.id());
+            ctx.client.data_sources.remove(&ctx.proxy);
         }
         Request::SetActions(_) => todo!(),
     }
@@ -215,10 +215,10 @@ fn wl_data_device_cb(ctx: RequestCtx<WlDataDevice>) -> io::Result<()> {
 
             ctx.state.seat.selection = match args.source {
                 None => None,
-                Some(id) => Some(
+                Some(source) => Some(
                     ctx.client
                         .data_sources
-                        .remove(&id)
+                        .remove(&source)
                         .ok_or_else(|| io::Error::other("used data usource"))?,
                 ),
             };
@@ -248,7 +248,7 @@ fn wl_data_offer_cb(ctx: RequestCtx<WlDataOffer>) -> io::Result<()> {
                 .seat
                 .data_offers
                 .borrow()
-                .get(&ctx.proxy.id())
+                .get(&ctx.proxy)
                 .unwrap()
                 .clone();
             if data_source.is_alive() {
@@ -261,7 +261,7 @@ fn wl_data_offer_cb(ctx: RequestCtx<WlDataOffer>) -> io::Result<()> {
                 .seat
                 .data_offers
                 .borrow_mut()
-                .remove(&ctx.proxy.id());
+                .remove(&ctx.proxy);
         }
         Request::Finish => todo!(),
         Request::SetActions(_) => todo!(),

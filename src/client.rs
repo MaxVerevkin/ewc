@@ -143,7 +143,7 @@ pub struct Client {
     registries: Vec<WlRegistry>,
     pub compositor: Compositor,
     pub shm: Shm,
-    pub data_sources: HashMap<ObjectId, DataSource>,
+    pub data_sources: HashMap<WlDataSource, DataSource>,
 }
 
 impl Client {

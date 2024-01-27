@@ -202,12 +202,7 @@ impl IsGlobal for XdgWmBase {
                 }
                 Request::CreatePositioner(_) => todo!(),
                 Request::GetXdgSurface(args) => {
-                    let surface = ctx
-                        .client
-                        .compositor
-                        .surfaces
-                        .get(&args.surface)
-                        .ok_or_else(|| io::Error::other("invalid surface id"))?;
+                    let surface = ctx.client.compositor.surfaces.get(&args.surface).unwrap();
                     if surface.has_role() {
                         return Err(io::Error::other("surface already has a role"));
                     }
@@ -226,7 +221,7 @@ impl IsGlobal for XdgWmBase {
                     ctx.client
                         .compositor
                         .xdg_surfaces
-                        .insert(args.id.id(), xdg_surface.clone());
+                        .insert(args.id, xdg_surface.clone());
                     *surface.role.borrow_mut() = SurfaceRole::Xdg(xdg_surface);
                 }
                 Request::Pong(_) => todo!(),
@@ -237,12 +232,7 @@ impl IsGlobal for XdgWmBase {
 }
 
 fn xdg_surface_cb(ctx: RequestCtx<XdgSurface>) -> io::Result<()> {
-    let xdg_surface = ctx
-        .client
-        .compositor
-        .xdg_surfaces
-        .get(&ctx.proxy.id())
-        .unwrap();
+    let xdg_surface = ctx.client.compositor.xdg_surfaces.get(&ctx.proxy).unwrap();
 
     use xdg_surface::Request;
     match ctx.request {
@@ -251,7 +241,7 @@ fn xdg_surface_cb(ctx: RequestCtx<XdgSurface>) -> io::Result<()> {
                 return Err(io::Error::other("xdg_surface destroyed before role"));
             }
             *xdg_surface.wl_surface.upgrade().unwrap().role.borrow_mut() = SurfaceRole::None;
-            ctx.client.compositor.xdg_surfaces.remove(&ctx.proxy.id());
+            ctx.client.compositor.xdg_surfaces.remove(&ctx.proxy);
         }
         Request::GetToplevel(toplevel) => {
             if !matches!(&*xdg_surface.specific.borrow(), SpecificRole::None) {
@@ -278,7 +268,7 @@ fn xdg_surface_cb(ctx: RequestCtx<XdgSurface>) -> io::Result<()> {
             ctx.client
                 .compositor
                 .xdg_toplevels
-                .insert(toplevel.wl.id(), toplevel.clone());
+                .insert(toplevel.wl.clone(), toplevel.clone());
             *xdg_surface.specific.borrow_mut() = SpecificRole::Toplevel(toplevel);
         }
         Request::GetPopup(_) => todo!(),
@@ -306,12 +296,7 @@ fn xdg_surface_cb(ctx: RequestCtx<XdgSurface>) -> io::Result<()> {
 }
 
 fn xdg_toplevel_cb(ctx: RequestCtx<XdgToplevel>) -> io::Result<()> {
-    let toplevel = ctx
-        .client
-        .compositor
-        .xdg_toplevels
-        .get(&ctx.proxy.id())
-        .unwrap();
+    let toplevel = ctx.client.compositor.xdg_toplevels.get(&ctx.proxy).unwrap();
 
     use xdg_toplevel::Request;
     match ctx.request {
@@ -323,7 +308,7 @@ fn xdg_toplevel_cb(ctx: RequestCtx<XdgToplevel>) -> io::Result<()> {
                 .unwrap()
                 .specific
                 .borrow_mut() = SpecificRole::None;
-            ctx.client.compositor.xdg_toplevels.remove(&ctx.proxy.id());
+            ctx.client.compositor.xdg_toplevels.remove(&ctx.proxy);
         }
         Request::SetParent(_) => todo!(),
         Request::SetTitle(title) => {
