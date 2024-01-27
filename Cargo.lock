@@ -454,11 +454,12 @@ dependencies = [
 
 [[package]]
 name = "wayrs-proto-parser"
-version = "1.0.1"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d6b63741f22a742facc6c01393c48ef17eaa1e98e5ba369069569e9314adc0c"
+checksum = "1406ebeb6ba4a201745a92c221eca3dcec5b404fcbe948acf8a166b323582fa9"
 dependencies = [
  "quick-xml",
+ "thiserror",
 ]
 
 [[package]]
@@ -472,9 +473,9 @@ dependencies = [
 
 [[package]]
 name = "wayrs-scanner"
-version = "0.13.1"
+version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c99d17b157386bd3d498084361671baf48f5669871e064233852149e8be71596"
+checksum = "e387d47549e37bd2a6f03973a77578bb003f661559a096c9274b5b9bcd78bf1f"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -631,9 +632,9 @@ checksum = "dff9641d1cd4be8d1a070daf9e3773c5f67e78b4d9d42263020c057706765c04"
 
 [[package]]
 name = "winnow"
-version = "0.5.34"
+version = "0.5.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7cf47b659b318dccbd69cc4797a39ae128f533dce7902a1096044d1967b9c16"
+checksum = "1931d78a9c73861da0134f453bb1f790ce49b2e30eba8410b4b79bac72b46a2d"
 dependencies = [
  "memchr",
 ]

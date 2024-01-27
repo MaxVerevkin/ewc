@@ -9,7 +9,7 @@ edition.workspace = true
 proc-macro = true
 
 [dependencies]
-wayrs-proto-parser = "1.0"
+wayrs-proto-parser = "2.0"
 proc-macro2 = "1.0"
 quote = "1.0"
 

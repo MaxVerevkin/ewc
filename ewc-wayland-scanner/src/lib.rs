@@ -21,7 +21,13 @@ pub fn generate(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     };
 
     let file = std::fs::read_to_string(path).expect("could not read the file");
-    let protocol = parse_protocol(&file);
+    let protocol = match parse_protocol(&file) {
+        Ok(protocol) => protocol,
+        Err(err) => {
+            let err = format!("error parsing the protocol file: {err}");
+            return quote!(compile_error!(#err);).into();
+        }
+    };
 
     let modules = protocol.interfaces.into_iter().map(|i| gen_interface(i));
 
@@ -58,30 +64,21 @@ fn gen_interface(mut iface: Interface) -> TokenStream {
             .iter()
             .cloned()
             .flat_map(|arg| {
-                if arg.arg_type == "new_id" && arg.interface.is_none() {
+                if matches!(arg.arg_type, ArgType::NewId { iface: None }) {
                     vec![
                         Argument {
                             name: format!("{}_interface", arg.name),
-                            arg_type: "string".into(),
-                            allow_null: false,
-                            enum_type: None,
-                            interface: None,
+                            arg_type: ArgType::String { allow_null: false },
                             summary: None,
                         },
                         Argument {
                             name: format!("{}_version", arg.name),
-                            arg_type: "uint".into(),
-                            allow_null: false,
-                            enum_type: None,
-                            interface: None,
+                            arg_type: ArgType::Uint,
                             summary: None,
                         },
                         Argument {
                             name: format!("{}_id", arg.name),
-                            arg_type: "uint".into(),
-                            allow_null: false,
-                            enum_type: None,
-                            interface: None,
+                            arg_type: ArgType::Uint,
                             summary: None,
                         },
                     ]
@@ -163,16 +160,16 @@ fn gen_interface(mut iface: Interface) -> TokenStream {
         let arg_names = request.args.iter().map(|arg| make_ident(&arg.name));
         let arg_decode = request.args.iter().map(|arg| {
             let arg_name = make_ident(&arg.name);
-            match (arg.arg_type.as_str(), arg.enum_type.is_some(), arg.interface.as_deref()) {
-                ("int" | "uint", true, _) => quote! {
+            match &arg.arg_type {
+                ArgType::Enum(_) => quote! {
                     match #arg_name.try_into() {
                         Ok(val) => val,
                         Err(_) => return Err(crate::wayland_core::BadMessage),
                     }
                 },
-                ("new_id" | "object", _, Some(iface)) => {
+                ArgType::NewId{iface:Some(iface)}|ArgType::Object{iface:Some(iface),allow_null:false} => {
                     let proxy_path = make_proxy_path(iface);
-                    let map = quote!{
+                    quote!{
                         match conn.get_object(#arg_name) {
                             None => return Err(crate::wayland_core::BadMessage),
                             Some(object) => match #proxy_path::try_from(object) {
@@ -180,16 +177,21 @@ fn gen_interface(mut iface: Interface) -> TokenStream {
                                 Ok(val) => val,
                             }
                         }
-                    };
-                    if arg.allow_null {
-                        quote!{
-                            match #arg_name {
-                                Some(#arg_name) => Some(#map),
-                                None => None,
+                    }
+                }
+                ArgType::Object{iface:Some(iface),allow_null:true} => {
+                    let proxy_path = make_proxy_path(iface);
+                    quote!{
+                        match #arg_name {
+                            Some(#arg_name) => match conn.get_object(#arg_name) {
+                                None => return Err(crate::wayland_core::BadMessage),
+                                Some(object) => match #proxy_path::try_from(object) {
+                                    Err(_) => return Err(crate::wayland_core::BadMessage),
+                                    Ok(val) => Some(val),
+                                }
                             }
+                            None => None,
                         }
-                    } else {
-                        map
                     }
                 }
                 _ => quote!(#arg_name),
@@ -414,14 +416,16 @@ fn gen_event_fn(opcode: u16, event: &Message) -> TokenStream {
     let msg_args = event.args.iter().map(|arg| {
         let arg_name = make_ident(&arg.name);
         let arg_ty = map_arg_to_argval(arg);
-        match arg.arg_type.as_str() {
-            "object" | "new_id" if arg.interface.is_some() => {
-                if arg.allow_null {
-                    quote! { crate::wayland_core::ArgValue::#arg_ty(#arg_name.map(Proxy::id)) }
-                } else {
-                    quote! { crate::wayland_core::ArgValue::#arg_ty(#arg_name.id()) }
-                }
-            }
+        match &arg.arg_type {
+            ArgType::NewId { iface: Some(_) }
+            | ArgType::Object {
+                iface: Some(_),
+                allow_null: false,
+            } => quote! { crate::wayland_core::ArgValue::#arg_ty(#arg_name.id()) },
+            ArgType::Object {
+                iface: Some(_),
+                allow_null: true,
+            } => quote! { crate::wayland_core::ArgValue::#arg_ty(#arg_name.map(Proxy::id)) },
             _ => quote! { crate::wayland_core::ArgValue::#arg_ty(#arg_name.into()) },
         }
     });
@@ -461,53 +465,49 @@ fn gen_event_fn(opcode: u16, event: &Message) -> TokenStream {
 }
 
 fn map_arg_to_argtype(arg: &Argument) -> TokenStream {
-    match arg.arg_type.as_str() {
-        "int" if arg.enum_type.is_some() => quote!(Uint),
-        "int" => quote!(Int),
-        "uint" => quote!(Uint),
-        "fixed" => quote!(Fixed),
-        "object" => match arg.allow_null {
+    match &arg.arg_type {
+        ArgType::Int => quote!(Int),
+        ArgType::Uint | ArgType::Enum(_) => quote!(Uint),
+        ArgType::Fixed => quote!(Fixed),
+        ArgType::Object { allow_null, .. } => match allow_null {
             false => quote!(Object),
             true => quote!(OptObject),
         },
-        "new_id" => match &arg.interface {
+        ArgType::NewId { iface } => match iface {
             Some(iface) => {
                 let proxy_name = make_proxy_path(iface);
                 quote!(NewId(#proxy_name::INTERFACE))
             }
             None => quote!(AnyNewId),
         },
-        "string" => match arg.allow_null {
+        ArgType::String { allow_null } => match allow_null {
             false => quote!(String),
             true => quote!(OptString),
         },
-        "array" => quote!(Array),
-        "fd" => quote!(Fd),
-        _ => unreachable!(),
+        ArgType::Array => quote!(Array),
+        ArgType::Fd => quote!(Fd),
     }
 }
 
 fn map_arg_to_argval(arg: &Argument) -> TokenStream {
-    match arg.arg_type.as_str() {
-        "int" if arg.enum_type.is_some() => quote!(Uint),
-        "int" => quote!(Int),
-        "uint" => quote!(Uint),
-        "fixed" => quote!(Fixed),
-        "object" => match arg.allow_null {
+    match &arg.arg_type {
+        ArgType::Int => quote!(Int),
+        ArgType::Uint | ArgType::Enum(_) => quote!(Uint),
+        ArgType::Fixed => quote!(Fixed),
+        ArgType::Object { allow_null, .. } => match allow_null {
             false => quote!(Object),
             true => quote!(OptObject),
         },
-        "new_id" => match arg.interface.as_deref() {
+        ArgType::NewId { iface } => match iface {
             Some(_) => quote!(NewId),
             None => quote!(AnyNewId),
         },
-        "string" => match arg.allow_null {
+        ArgType::String { allow_null } => match allow_null {
             false => quote!(String),
             true => quote!(OptString),
         },
-        "array" => quote!(Array),
-        "fd" => quote!(Fd),
-        _ => unreachable!(),
+        ArgType::Array => quote!(Array),
+        ArgType::Fd => quote!(Fd),
     }
 }
 
@@ -546,15 +546,10 @@ trait ArgExt {
 impl ArgExt for Argument {
     fn as_event_fn_arg(&self) -> TokenStream {
         let arg_name = make_ident(&self.name);
-        let retval = match (
-            self.arg_type.as_str(),
-            self.interface.as_deref(),
-            self.enum_type.as_deref(),
-            self.allow_null,
-        ) {
-            ("int", None, None, false) => quote!(#arg_name: i32),
-            ("uint", None, None, false) => quote!(#arg_name: u32),
-            ("int" | "uint", None, Some(enum_ty), false) => {
+        let retval = match &self.arg_type {
+            ArgType::Int => quote!(#arg_name: i32),
+            ArgType::Uint => quote!(#arg_name: u32),
+            ArgType::Enum(enum_ty) => {
                 if let Some((iface, name)) = enum_ty.split_once('.') {
                     let iface_name = syn::Ident::new(iface, Span::call_site());
                     let enum_name = make_pascal_case_ident(name);
@@ -564,47 +559,57 @@ impl ArgExt for Argument {
                     quote!(#arg_name: #enum_name)
                 }
             }
-            ("fixed", None, None, false) => quote!(#arg_name: crate::wayland_core::Fixed),
-            ("object", None, None, allow_null) => match allow_null {
+            ArgType::Fixed => quote!(#arg_name: crate::wayland_core::Fixed),
+            ArgType::Object {
+                allow_null,
+                iface: None,
+            } => match allow_null {
                 false => quote!(#arg_name: ObjectId),
                 true => quote!(#arg_name: ::std::option::Option<ObjectId>),
             },
-            ("object" | "new_id", Some(iface), None, allow_null) => {
+            ArgType::Object {
+                allow_null,
+                iface: Some(iface),
+            } => {
                 let proxy_path = make_proxy_path(iface);
                 match allow_null {
                     false => quote!(#arg_name: &#proxy_path),
                     true => quote!(#arg_name: ::std::option::Option<&#proxy_path>),
                 }
             }
-            ("new_id", None, None, false) => unimplemented!(),
-            ("string", None, None, allow_null) => match allow_null {
+            ArgType::NewId { iface: Some(iface) } => {
+                let proxy_path = make_proxy_path(iface);
+                quote!(#arg_name: &#proxy_path)
+            }
+            ArgType::NewId { iface: None } => unimplemented!(),
+            ArgType::String { allow_null } => match allow_null {
                 false => quote!(#arg_name: ::std::ffi::CString),
                 true => quote!(#arg_name: ::std::option::Option<::std::ffi::CString>),
             },
-            ("array", None, None, false) => quote!(#arg_name: ::std::vec::Vec<u8>),
-            ("fd", None, None, false) => quote!(#arg_name: ::std::os::fd::OwnedFd),
-            _ => unreachable!(),
+            ArgType::Array => quote!(#arg_name: ::std::vec::Vec<u8>),
+            ArgType::Fd => quote!(#arg_name: ::std::os::fd::OwnedFd),
         };
         retval
     }
 
     fn as_request_ty(&self) -> TokenStream {
-        match self.arg_type.as_str() {
-            "int" | "uint" if self.enum_type.is_some() => {
-                let enum_type = self.enum_type.as_deref().unwrap();
-                if let Some((iface, name)) = enum_type.split_once('.') {
+        match &self.arg_type {
+            ArgType::Enum(enum_ty) => {
+                if let Some((iface, name)) = enum_ty.split_once('.') {
                     let iface_name = syn::Ident::new(iface, Span::call_site());
                     let enum_name = make_pascal_case_ident(name);
                     quote!(super::#iface_name::#enum_name)
                 } else {
-                    let enum_name = make_pascal_case_ident(enum_type);
+                    let enum_name = make_pascal_case_ident(enum_ty);
                     quote!(#enum_name)
                 }
             }
-            "int" => quote!(i32),
-            "uint" => quote!(u32),
-            "fixed" => quote!(crate::wayland_core::Fixed),
-            "new_id" | "object" => match (&self.interface, self.allow_null) {
+            ArgType::Int => quote!(i32),
+            ArgType::Uint => quote!(u32),
+            ArgType::Fixed => quote!(crate::wayland_core::Fixed),
+            ArgType::NewId { iface: None } => unreachable!(),
+            ArgType::NewId { iface: Some(iface) } => make_proxy_path(iface),
+            ArgType::Object { iface, allow_null } => match (&iface, allow_null) {
                 (None, false) => quote!(Object),
                 (None, true) => quote!(Option<Object>),
                 (Some(iface), false) => make_proxy_path(iface),
@@ -613,13 +618,12 @@ impl ArgExt for Argument {
                     quote!(Option<#proxy>)
                 }
             },
-            "string" => match self.allow_null {
+            ArgType::String { allow_null } => match allow_null {
                 false => quote!(::std::ffi::CString),
                 true => quote!(::std::option::Option<::std::ffi::CString>),
             },
-            "array" => quote!(::std::vec::Vec<u8>),
-            "fd" => quote!(::std::os::fd::OwnedFd),
-            _ => unreachable!(),
+            ArgType::Array => quote!(::std::vec::Vec<u8>),
+            ArgType::Fd => quote!(::std::os::fd::OwnedFd),
         }
     }
 }
