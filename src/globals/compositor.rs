@@ -5,14 +5,14 @@ use std::num::Wrapping;
 use std::rc::{Rc, Weak};
 
 use super::xdg_shell;
-use super::IsGlobal;
 use crate::backend::BufferId;
 use crate::client::RequestCtx;
+use crate::globals::{GlobalsManager, IsGlobal};
 use crate::protocol::*;
 use crate::wayland_core::Proxy;
-use crate::State;
-use crate::{Client, Global};
+use crate::{Client, State};
 
+#[derive(Default)]
 pub struct Compositor {
     pub next_configure_serial: Wrapping<u32>,
     pub regions: HashMap<WlRegion, pixman::Region32>,
@@ -23,19 +23,9 @@ pub struct Compositor {
 }
 
 impl Compositor {
-    pub fn global(name: u32) -> Global {
-        Global::new::<WlCompositor>(name, 6)
-    }
-
-    pub fn new() -> Self {
-        Self {
-            next_configure_serial: Wrapping(0),
-            regions: HashMap::new(),
-            surfaces: HashMap::new(),
-            subsurfaces: HashMap::new(),
-            xdg_surfaces: HashMap::new(),
-            xdg_toplevels: HashMap::new(),
-        }
+    pub fn register_globals(globals: &mut GlobalsManager) {
+        globals.add_global::<WlCompositor>(6);
+        globals.add_global::<WlSubcompositor>(1);
     }
 }
 

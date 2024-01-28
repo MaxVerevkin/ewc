@@ -140,7 +140,6 @@ pub struct RequestCtx<'a, P: Proxy> {
 
 pub struct Client {
     pub conn: Rc<Connection>,
-    registries: Vec<WlRegistry>,
     pub compositor: Compositor,
     pub shm: Shm,
     pub data_sources: HashMap<WlDataSource, DataSource>,
@@ -152,8 +151,7 @@ impl Client {
         conn.wl_display.set_callback(wl_display_cb);
         Self {
             conn,
-            registries: Vec::new(),
-            compositor: Compositor::new(),
+            compositor: Compositor::default(),
             shm: Shm::new(),
             data_sources: HashMap::new(),
         }
@@ -187,25 +185,7 @@ fn wl_display_cb(ctx: RequestCtx<WlDisplay>) -> io::Result<()> {
     use wl_display::Request;
     match ctx.request {
         Request::Sync(cb) => cb.done(0), // WTF is this "event serial"?
-        Request::GetRegistry(registry) => {
-            registry.set_callback(wl_registry_cb);
-            for g in &ctx.state.globals {
-                registry.global(g.name(), g.interface().name.into(), g.version());
-            }
-            ctx.client.registries.push(registry);
-        }
+        Request::GetRegistry(registry) => ctx.state.globals.add_registry(registry),
     }
     Ok(())
-}
-
-fn wl_registry_cb(ctx: RequestCtx<WlRegistry>) -> io::Result<()> {
-    let wl_registry::Request::Bind(args) = ctx.request;
-    let global = ctx
-        .state
-        .globals
-        .iter()
-        .find(|g| g.name() == args.name)
-        .ok_or_else(|| io::Error::other("wl_registry::bind with invalid name"))?
-        .clone();
-    global.bind(ctx.client, ctx.state, args)
 }

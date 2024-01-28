@@ -28,7 +28,7 @@ use crate::event_loop::EventLoop;
 use crate::focus_stack::FocusStack;
 use crate::globals::compositor::{Compositor, Surface};
 use crate::globals::ewc_debug::Debugger;
-use crate::globals::Global;
+use crate::globals::GlobalsManager;
 use crate::protocol::xdg_toplevel::ResizeEdge;
 use crate::protocol::*;
 use crate::seat::pointer::{PtrState, BTN_LEFT, BTN_RIGHT};
@@ -55,7 +55,7 @@ pub struct Server {
 }
 
 pub struct State {
-    pub globals: Vec<Global>,
+    pub globals: GlobalsManager,
     pub backend: Box<dyn Backend>,
     pub seat: Seat,
     pub cursor: Option<(Rc<Surface>, i32, i32)>,
@@ -87,6 +87,7 @@ fn choose_backend() -> Box<dyn Backend> {
 impl Server {
     pub fn destroy_client(&mut self, client_id: ClientId) {
         eprintln!("destroying client");
+        self.state.globals.remove_client(client_id);
         self.state.seat.remove_client(client_id);
         self.state.focus_stack.remove_client(client_id);
         self.state.debugger.remove_client(client_id);
@@ -108,6 +109,13 @@ impl Server {
                 event_loop.add_fd(fd, event_loop::Event::Backend(data))
             })
             .unwrap();
+        let mut globals = GlobalsManager::default();
+        Compositor::register_globals(&mut globals);
+        Seat::register_globals(&mut globals);
+        globals.add_global::<WlShm>(1);
+        globals.add_global::<XdgWmBase>(3);
+        globals.add_global::<WlOutput>(2);
+        globals.add_global::<EwcDebugV1>(1);
         Self {
             socket,
             socket_path,
@@ -116,16 +124,7 @@ impl Server {
             next_client_id: ClientId::first(),
             event_loop,
             state: State {
-                globals: vec![
-                    Compositor::global(1),
-                    Global::new::<WlSubcompositor>(2, 1),
-                    Global::new::<WlShm>(3, 1),
-                    Global::new::<XdgWmBase>(4, 3),
-                    Seat::data_device_manager_global(5),
-                    Seat::global(6),
-                    Global::new::<WlOutput>(7, 2),
-                    Global::new::<EwcDebugV1>(8, 1),
-                ],
+                globals,
                 backend,
                 seat: Seat::new(),
                 cursor: None,

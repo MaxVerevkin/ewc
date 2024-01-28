@@ -4,7 +4,7 @@ use std::ffi::CString;
 use std::io;
 
 use crate::client::{ClientId, RequestCtx};
-use crate::globals::{Global, IsGlobal};
+use crate::globals::{GlobalsManager, IsGlobal};
 use crate::protocol::*;
 use crate::wayland_core::Proxy;
 use crate::{Client, State};
@@ -33,12 +33,9 @@ pub struct DataSource {
 }
 
 impl Seat {
-    pub fn global(name: u32) -> Global {
-        Global::new::<WlSeat>(name, 5)
-    }
-
-    pub fn data_device_manager_global(name: u32) -> Global {
-        Global::new::<WlDataDeviceManager>(name, 3)
+    pub fn register_globals(globals: &mut GlobalsManager) {
+        globals.add_global::<WlSeat>(5);
+        globals.add_global::<WlDataDeviceManager>(3);
     }
 
     pub fn new() -> Self {
