@@ -5,18 +5,18 @@ use super::*;
 
 pub struct RendererStateImp {
     shm_pools: HashMap<ShmPoolId, ShmPool>,
+    resource_mapping: HashMap<crate::protocol::WlBuffer, BufferId>,
     shm_buffers: HashMap<BufferId, ShmBuffer>,
-    next_shm_pool_id: NonZeroU64,
-    next_buffer_id: NonZeroU64,
+    next_id: NonZeroU64,
 }
 
-pub struct ShmPool {
+struct ShmPool {
     memmap: memmap2::Mmap,
     size: usize,
     resource_alive: bool,
 }
 
-pub struct ShmBuffer {
+struct ShmBuffer {
     spec: ShmBufferSpec,
     locks: u32,
     resource: Option<crate::protocol::WlBuffer>,
@@ -26,10 +26,37 @@ impl RendererStateImp {
     pub fn new() -> Self {
         Self {
             shm_pools: HashMap::new(),
+            resource_mapping: HashMap::new(),
             shm_buffers: HashMap::new(),
-            next_shm_pool_id: NonZeroU64::MIN,
-            next_buffer_id: NonZeroU64::MIN,
+            next_id: NonZeroU64::MIN,
         }
+    }
+
+    pub fn frame<'a>(
+        &'a self,
+        bytes: &'a mut [u8],
+        width: u32,
+        height: u32,
+        wl_format: u32,
+    ) -> Box<dyn Frame + 'a> {
+        Box::new(FrameImp {
+            time: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u32,
+            width,
+            height,
+            image: pixman::Image::from_slice_mut(
+                wl_format_to_pixman(wl_format).unwrap(),
+                width as usize,
+                height as usize,
+                bytes_to_ints(bytes),
+                width as usize * 4,
+                false,
+            )
+            .unwrap(),
+            state: self,
+        })
     }
 
     fn consider_dropping_shm_pool(&mut self, pool_id: ShmPoolId) {
@@ -54,7 +81,7 @@ impl RendererStateImp {
 
 impl RendererState for RendererStateImp {
     fn create_shm_pool(&mut self, fd: OwnedFd, size: usize) -> ShmPoolId {
-        let id = ShmPoolId(next_id(&mut self.next_shm_pool_id));
+        let id = ShmPoolId(next_id(&mut self.next_id));
         self.shm_pools.insert(
             id,
             ShmPool {
@@ -83,12 +110,9 @@ impl RendererState for RendererStateImp {
         self.consider_dropping_shm_pool(pool_id);
     }
 
-    fn create_shm_buffer(
-        &mut self,
-        spec: ShmBufferSpec,
-        resource: crate::protocol::WlBuffer,
-    ) -> BufferId {
-        let id = BufferId(next_id(&mut self.next_buffer_id));
+    fn create_shm_buffer(&mut self, spec: ShmBufferSpec, resource: crate::protocol::WlBuffer) {
+        let id = BufferId(next_id(&mut self.next_id));
+        self.resource_mapping.insert(resource.clone(), id);
         self.shm_buffers.insert(
             id,
             ShmBuffer {
@@ -97,7 +121,12 @@ impl RendererState for RendererStateImp {
                 locks: 0,
             },
         );
-        id
+    }
+
+    fn buffer_commited(&mut self, resource: crate::protocol::WlBuffer) -> BufferId {
+        let buffer_id = *self.resource_mapping.get(&resource).unwrap();
+        self.buffer_lock(buffer_id);
+        buffer_id
     }
 
     fn get_buffer_size(&self, buffer_id: BufferId) -> (u32, u32) {
@@ -124,7 +153,8 @@ impl RendererState for RendererStateImp {
         }
     }
 
-    fn buffer_resource_destroyed(&mut self, buffer_id: BufferId) {
+    fn buffer_resource_destroyed(&mut self, resource: crate::protocol::WlBuffer) {
+        let buffer_id = self.resource_mapping.remove(&resource).unwrap();
         let buf = self.shm_buffers.get_mut(&buffer_id).unwrap();
         buf.resource = None;
         if buf.locks == 0 {
@@ -133,37 +163,28 @@ impl RendererState for RendererStateImp {
     }
 }
 
-pub struct Renderer<'a> {
+struct FrameImp<'a> {
+    time: u32,
+    width: u32,
+    height: u32,
     image: pixman::Image<'a, 'static>,
     state: &'a RendererStateImp,
 }
 
-impl<'a> Renderer<'a> {
-    pub fn new(
-        state: &'a RendererStateImp,
-        bytes: &'a mut [u8],
-        width: u32,
-        height: u32,
-        wl_format: u32,
-    ) -> Self {
-        Self {
-            image: pixman::Image::from_slice_mut(
-                wl_format_to_pixman(wl_format).unwrap(),
-                width as usize,
-                height as usize,
-                bytes_to_ints(bytes),
-                width as usize * 4,
-                false,
-            )
-            .unwrap(),
-            state,
-        }
+impl Frame for FrameImp<'_> {
+    fn time(&self) -> u32 {
+        self.time
     }
-}
 
-impl Renderer<'_> {
-    pub fn clear(&mut self, r: f32, g: f32, b: f32) {
-        // eprintln!("fill {r} {g} {b}");
+    fn width(&self) -> u32 {
+        self.width
+    }
+
+    fn height(&self) -> u32 {
+        self.height
+    }
+
+    fn clear(&mut self, r: f32, g: f32, b: f32) {
         self.image
             .fill_boxes(
                 pixman::Operation::Src,
@@ -178,7 +199,7 @@ impl Renderer<'_> {
             .unwrap();
     }
 
-    pub fn render_buffer(
+    fn render_buffer(
         &mut self,
         buf: BufferId,
         opaque_region: Option<&pixman::Region32>,
@@ -193,7 +214,6 @@ impl Renderer<'_> {
             &pool.memmap[spec.offset as usize..][..spec.stride as usize * spec.height as usize];
         let wl_format = spec.wl_format;
 
-        // eprintln!("render_buffer at {x},{y}");
         let src = unsafe {
             pixman::Image::from_raw_mut(
                 wl_format_to_pixman(wl_format).unwrap(),
@@ -235,7 +255,7 @@ impl Renderer<'_> {
         );
     }
 
-    pub fn render_rect(&mut self, r: f32, g: f32, b: f32, a: f32, rect: pixman::Rectangle32) {
+    fn render_rect(&mut self, r: f32, g: f32, b: f32, a: f32, rect: pixman::Rectangle32) {
         let op = if a == 1.0 {
             pixman::Operation::Src
         } else {

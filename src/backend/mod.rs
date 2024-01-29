@@ -1,8 +1,10 @@
+use std::any::Any;
 use std::io;
 use std::num::NonZeroU64;
 use std::os::fd::{OwnedFd, RawFd};
 
 pub mod drmkms;
+mod gl46_renderer;
 mod pixman_renderer;
 pub mod wayland;
 
@@ -18,19 +20,16 @@ pub trait Backend {
     fn render_frame(&mut self, f: &mut dyn FnMut(&mut dyn Frame));
 }
 
-pub trait RendererState {
+pub trait RendererState: Any {
     fn create_shm_pool(&mut self, fd: OwnedFd, size: usize) -> ShmPoolId;
     fn resize_shm_pool(&mut self, pool_id: ShmPoolId, new_size: usize);
     fn shm_pool_resource_destroyed(&mut self, pool_id: ShmPoolId);
-    fn create_shm_buffer(
-        &mut self,
-        spec: ShmBufferSpec,
-        resource: crate::protocol::WlBuffer,
-    ) -> BufferId;
+    fn create_shm_buffer(&mut self, spec: ShmBufferSpec, resource: crate::protocol::WlBuffer);
+    fn buffer_commited(&mut self, buffer_resource: crate::protocol::WlBuffer) -> BufferId;
     fn get_buffer_size(&self, buffer_id: BufferId) -> (u32, u32);
     fn buffer_lock(&mut self, buffer_id: BufferId);
     fn buffer_unlock(&mut self, buffer_id: BufferId);
-    fn buffer_resource_destroyed(&mut self, buffer_id: BufferId);
+    fn buffer_resource_destroyed(&mut self, resource: crate::protocol::WlBuffer);
 }
 
 pub struct ShmBufferSpec {

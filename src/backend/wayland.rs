@@ -3,69 +3,64 @@ use std::io;
 use std::num::NonZeroU64;
 use std::os::fd::{AsRawFd, RawFd};
 
-use wayrs_client::global::GlobalsExt;
+use wayrs_client::global::{Global, GlobalsExt};
 use wayrs_client::proxy::Proxy as _;
 use wayrs_client::Connection;
 use wayrs_client::IoMode;
 use wayrs_client::{protocol::*, EventCtx};
+use wayrs_protocols::linux_dmabuf_unstable_v1::*;
 use wayrs_protocols::xdg_shell::*;
+use wayrs_utils::dmabuf_feedback::{DmabufFeedback, DmabufFeedbackHandler};
 use wayrs_utils::seats::{SeatHandler, Seats};
 use wayrs_utils::shm_alloc::{BufferSpec, ShmAlloc};
 
-use super::pixman_renderer::*;
 use super::*;
 
 struct BackendImp {
     conn: Connection<State>,
     state: State,
-    renderer_state: RendererStateImp,
 }
 
 pub fn new() -> Option<Box<dyn Backend>> {
-    let (mut conn, globals) = Connection::<State>::connect_and_collect_globals()
-        .map_err(|_| eprintln!("backend/wayland: could not connect to a wayland compositor"))
-        .ok()?;
+    let InitState {
+        mut conn,
+        globals,
+        dmabuf,
+    } = InitState::connect()?;
 
-    let shm = ShmAlloc::bind(&mut conn, &globals).unwrap();
     let seats = Seats::bind(&mut conn, &globals);
-    let wl_compositor: WlCompositor = globals.bind(&mut conn, 6).unwrap();
+    let wl_compositor: WlCompositor = globals.bind(&mut conn, 5..=6).unwrap();
     let xdg_wm_base: XdgWmBase = globals.bind(&mut conn, 1).unwrap();
 
     let wl_surface = wl_compositor.create_surface(&mut conn);
-    let xdg_surface = xdg_wm_base.get_xdg_surface_with_cb(&mut conn, wl_surface, |ctx| {
-        if let xdg_surface::Event::Configure(serial) = ctx.event {
-            ctx.proxy.ack_configure(ctx.conn, serial);
-            if !ctx.state.mapped {
-                ctx.state.mapped = true;
-                ctx.state
-                    .backend_events_queue
-                    .push_back(BackendEvent::Frame);
-            }
-        }
-    });
-    let xdg_toplevel = xdg_surface.get_toplevel_with_cb(&mut conn, |ctx| match ctx.event {
-        xdg_toplevel::Event::Configure(args) => {
-            if args.width != 0 {
-                ctx.state.width = args.width.try_into().unwrap();
-            }
-            if args.height != 0 {
-                ctx.state.height = args.height.try_into().unwrap();
-            }
-        }
-        xdg_toplevel::Event::Close => {
-            ctx.state
-                .backend_events_queue
-                .push_back(BackendEvent::ShutDown);
-            ctx.conn.break_dispatch_loop();
-        }
-        _ => unreachable!(),
-    });
+    let xdg_surface = xdg_wm_base.get_xdg_surface_with_cb(&mut conn, wl_surface, xdg_surface_cb);
+    let xdg_toplevel = xdg_surface.get_toplevel_with_cb(&mut conn, xdg_toplevel_cb);
     wl_surface.commit(&mut conn);
+
+    let renderer_kind = match dmabuf {
+        Some((linux_dmabuf, feedback)) if std::env::var_os("EWC_NO_GL").is_none() => {
+            let drm_device =
+                eglgbm::DrmDevice::new_from_id(feedback.main_device().unwrap()).unwrap();
+            let render_node_path = drm_device.render_node().unwrap();
+            RendererKind::OpenGl {
+                linux_dmabuf,
+                swapchain: None,
+                state: Box::new(gl46_renderer::RendererStateImp::new(
+                    render_node_path,
+                    Some(feedback),
+                )?),
+            }
+        }
+        _ => RendererKind::Pixman {
+            shm: ShmAlloc::bind(&mut conn, &globals).unwrap(),
+            state: pixman_renderer::RendererStateImp::new(),
+        },
+    };
 
     let state = State {
         backend_events_queue: VecDeque::new(),
+        renderer_kind,
 
-        shm,
         seats,
 
         next_input_id: NonZeroU64::MIN,
@@ -77,15 +72,11 @@ pub fn new() -> Option<Box<dyn Backend>> {
         xdg_toplevel,
         throttle_cb: None,
         mapped: false,
-        width: 800,
-        height: 600,
+        width: 80,
+        height: 60,
     };
     conn.flush(IoMode::Blocking).unwrap();
-    Some(Box::new(BackendImp {
-        conn,
-        state,
-        renderer_state: RendererStateImp::new(),
-    }))
+    Some(Box::new(BackendImp { conn, state }))
 }
 
 impl Backend for BackendImp {
@@ -113,24 +104,17 @@ impl Backend for BackendImp {
     fn switch_vt(&mut self, _vt: u32) {}
 
     fn renderer_state(&mut self) -> &mut dyn RendererState {
-        &mut self.renderer_state
+        match &mut self.state.renderer_kind {
+            RendererKind::Pixman { state, .. } => state,
+            RendererKind::OpenGl { state, .. } => state.as_mut(),
+        }
     }
 
     fn render_frame(&mut self, f: &mut dyn FnMut(&mut dyn Frame)) {
         const FORMAT: wl_shm::Format = wl_shm::Format::Argb8888;
-
-        // eprintln!("start frame");
         assert!(self.state.mapped);
         assert!(self.state.throttle_cb.is_none());
-        let (buffer, canvas) = self.state.shm.alloc_buffer(
-            &mut self.conn,
-            BufferSpec {
-                width: self.state.width,
-                height: self.state.height,
-                stride: self.state.width * 4,
-                format: FORMAT,
-            },
-        );
+
         self.state.throttle_cb = Some(self.state.wl_surface.frame_with_cb(&mut self.conn, |ctx| {
             assert_eq!(ctx.state.throttle_cb, Some(ctx.proxy));
             ctx.state.throttle_cb = None;
@@ -138,77 +122,106 @@ impl Backend for BackendImp {
                 .backend_events_queue
                 .push_back(BackendEvent::Frame);
         }));
-        f(&mut FrameImp {
-            time: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as u32,
-            width: self.state.width,
-            height: self.state.height,
-            renderer: pixman_renderer::Renderer::new(
-                &self.renderer_state,
-                canvas,
-                self.state.width,
-                self.state.height,
-                FORMAT as u32,
-            ),
-        });
-        self.state
-            .wl_surface
-            .attach(&mut self.conn, Some(buffer.into_wl_buffer()), 0, 0);
+
+        match &mut self.state.renderer_kind {
+            RendererKind::Pixman { shm, state } => {
+                let (buffer, canvas) = shm.alloc_buffer(
+                    &mut self.conn,
+                    BufferSpec {
+                        width: self.state.width,
+                        height: self.state.height,
+                        stride: self.state.width * 4,
+                        format: FORMAT,
+                    },
+                );
+                f(state
+                    .frame(canvas, self.state.width, self.state.height, FORMAT as u32)
+                    .as_mut());
+                self.state
+                    .wl_surface
+                    .attach(&mut self.conn, Some(buffer.into_wl_buffer()), 0, 0);
+            }
+            RendererKind::OpenGl {
+                linux_dmabuf,
+                swapchain,
+                state,
+            } => 'blk: {
+                if let Some(sw) = swapchain {
+                    if sw.width != self.state.width || sw.height != self.state.height {
+                        eprintln!("destroying swapchain");
+                        for buf in &sw.bufs {
+                            eprintln!("destroying {:?}", buf.wl);
+                            buf.wl.destroy(&mut self.conn);
+                        }
+                        *swapchain = None;
+                    }
+                }
+
+                let sw = swapchain.get_or_insert_with(|| GlSwapchain {
+                    width: self.state.width,
+                    height: self.state.height,
+                    bufs: Vec::new(),
+                });
+
+                let buf = if let Some(buf) = sw.bufs.iter_mut().find(|buf| !buf.in_use) {
+                    buf
+                } else if sw.bufs.len() < 2 {
+                    let (egl_image, export) = state.allocate_buffer(sw.width, sw.height);
+                    let params = linux_dmabuf.create_params(&mut self.conn);
+                    for (i, plane) in export.planes.into_iter().enumerate() {
+                        params.add(
+                            &mut self.conn,
+                            plane.dmabuf,
+                            i as u32,
+                            plane.offset,
+                            plane.stride,
+                            (export.modifier >> 32) as u32,
+                            export.modifier as u32,
+                        );
+                    }
+                    let wl = params.create_immed_with_cb(
+                        &mut self.conn,
+                        sw.width as i32,
+                        sw.height as i32,
+                        export.format.0,
+                        zwp_linux_buffer_params_v1::Flags::empty(),
+                        dmabuf_wl_buffer_cb,
+                    );
+                    params.destroy(&mut self.conn);
+                    sw.bufs.push(GlBuf {
+                        wl,
+                        egl_image,
+                        in_use: false,
+                    });
+                    sw.bufs.last_mut().unwrap()
+                } else {
+                    eprintln!("backend/wayland/gl46: skipping frame, not enough buffers");
+                    break 'blk;
+                };
+                assert!(!buf.in_use);
+
+                f(state.frame(sw.width, sw.height, &buf.egl_image).as_mut());
+                state.finish_frame();
+
+                buf.in_use = true;
+                self.state
+                    .wl_surface
+                    .attach(&mut self.conn, Some(buf.wl), 0, 0);
+            }
+        }
+
         self.state
             .wl_surface
             .damage(&mut self.conn, 0, 0, i32::MAX, i32::MAX);
         self.state.wl_surface.commit(&mut self.conn);
         self.conn.flush(IoMode::Blocking).unwrap();
-        // eprintln!("end frame");
-    }
-}
-
-struct FrameImp<'a> {
-    time: u32,
-    width: u32,
-    height: u32,
-    renderer: super::pixman_renderer::Renderer<'a>,
-}
-
-impl Frame for FrameImp<'_> {
-    fn time(&self) -> u32 {
-        self.time
-    }
-
-    fn width(&self) -> u32 {
-        self.width
-    }
-
-    fn height(&self) -> u32 {
-        self.height
-    }
-
-    fn clear(&mut self, r: f32, g: f32, b: f32) {
-        self.renderer.clear(r, g, b);
-    }
-
-    fn render_buffer(
-        &mut self,
-        buf: BufferId,
-        opaque_region: Option<&pixman::Region32>,
-        alpha: f32,
-        x: i32,
-        y: i32,
-    ) {
-        self.renderer.render_buffer(buf, opaque_region, alpha, x, y);
-    }
-
-    fn render_rect(&mut self, r: f32, g: f32, b: f32, a: f32, rect: pixman::Rectangle32) {
-        self.renderer.render_rect(r, g, b, a, rect);
     }
 }
 
 struct State {
     backend_events_queue: VecDeque<BackendEvent>,
+    renderer_kind: RendererKind,
 
-    shm: ShmAlloc,
     seats: Seats,
 
     next_input_id: NonZeroU64,
@@ -224,6 +237,31 @@ struct State {
     mapped: bool,
     width: u32,
     height: u32,
+}
+
+enum RendererKind {
+    Pixman {
+        shm: ShmAlloc,
+        state: pixman_renderer::RendererStateImp,
+    },
+    OpenGl {
+        linux_dmabuf: ZwpLinuxDmabufV1,
+        swapchain: Option<GlSwapchain>,
+        state: Box<gl46_renderer::RendererStateImp>,
+    },
+}
+
+#[derive(Debug)]
+struct GlBuf {
+    wl: WlBuffer,
+    egl_image: eglgbm::EglImage,
+    in_use: bool,
+}
+
+struct GlSwapchain {
+    width: u32,
+    height: u32,
+    bufs: Vec<GlBuf>,
 }
 
 struct Keyboard {
@@ -399,5 +437,113 @@ fn wl_pointer_cb(ctx: EventCtx<State, WlPointer>) {
         // Event::AxisValue120(_) => todo!(),
         // Event::AxisRelativeDirection(_) => todo!(),
         _ => (),
+    }
+}
+
+fn xdg_surface_cb(ctx: EventCtx<State, XdgSurface>) {
+    if let xdg_surface::Event::Configure(serial) = ctx.event {
+        ctx.proxy.ack_configure(ctx.conn, serial);
+        if !ctx.state.mapped {
+            ctx.state.mapped = true;
+            ctx.state
+                .backend_events_queue
+                .push_back(BackendEvent::Frame);
+        }
+    }
+}
+
+fn xdg_toplevel_cb(ctx: EventCtx<State, XdgToplevel>) {
+    match ctx.event {
+        xdg_toplevel::Event::Configure(args) => {
+            if args.width != 0 {
+                ctx.state.width = args.width.try_into().unwrap();
+            }
+            if args.height != 0 {
+                ctx.state.height = args.height.try_into().unwrap();
+            }
+        }
+        xdg_toplevel::Event::Close => {
+            ctx.state
+                .backend_events_queue
+                .push_back(BackendEvent::ShutDown);
+            ctx.conn.break_dispatch_loop();
+        }
+        _ => unreachable!(),
+    }
+}
+
+struct InitState {
+    conn: Connection<State>,
+    globals: Vec<Global>,
+    dmabuf: Option<(ZwpLinuxDmabufV1, DmabufFeedback)>,
+}
+
+impl InitState {
+    fn connect() -> Option<Self> {
+        let (mut conn, globals) = Connection::<S>::connect_and_collect_globals()
+            .map_err(|_| eprintln!("backend/wayland: could not connect to a wayland compositor"))
+            .ok()?;
+        let linux_dmabuf = globals
+            .bind::<ZwpLinuxDmabufV1, _>(&mut conn, 4)
+            .map_err(|_| eprintln!("backend/wayland: linux-dmabuf is not supported"))
+            .ok();
+        let dmabuf = match linux_dmabuf {
+            Some(linux_dmabuf) => {
+                let mut s = S {
+                    feedback: DmabufFeedback::get_default(&mut conn, linux_dmabuf),
+                    done: false,
+                };
+                while !s.done {
+                    conn.flush(IoMode::Blocking)
+                        .map_err(|e| eprintln!("backend/wayland: io error: {e}"))
+                        .ok()?;
+                    conn.recv_events(IoMode::Blocking)
+                        .map_err(|e| eprintln!("backend/wayland: io error: {e}"))
+                        .ok()?;
+                    conn.dispatch_events(&mut s);
+                }
+                s.feedback.wl().destroy(&mut conn);
+                Some((linux_dmabuf, s.feedback))
+            }
+            None => None,
+        };
+
+        struct S {
+            feedback: DmabufFeedback,
+            done: bool,
+        }
+        impl DmabufFeedbackHandler for S {
+            fn get_dmabuf_feedback(
+                &mut self,
+                _wl: ZwpLinuxDmabufFeedbackV1,
+            ) -> &mut DmabufFeedback {
+                &mut self.feedback
+            }
+            fn feedback_done(
+                &mut self,
+                _conn: &mut Connection<Self>,
+                _wl: ZwpLinuxDmabufFeedbackV1,
+            ) {
+                self.done = true;
+            }
+        }
+
+        Some(Self {
+            conn: conn.clear_callbacks(),
+            globals,
+            dmabuf,
+        })
+    }
+}
+
+fn dmabuf_wl_buffer_cb(ctx: EventCtx<State, WlBuffer>) {
+    let wl_buffer::Event::Release = ctx.event;
+    let RendererKind::OpenGl { swapchain, .. } = &mut ctx.state.renderer_kind else {
+        unreachable!()
+    };
+    if let Some(sw) = swapchain {
+        if let Some(buf) = sw.bufs.iter_mut().find(|buf| buf.wl == ctx.proxy) {
+            buf.in_use = false;
+        }
     }
 }

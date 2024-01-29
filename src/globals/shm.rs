@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io;
 
 use super::IsGlobal;
-use crate::backend::{BufferId, ShmBufferSpec, ShmPoolId};
+use crate::backend::{ShmBufferSpec, ShmPoolId};
 use crate::client::RequestCtx;
 use crate::protocol::*;
 use crate::wayland_core::{ObjectId, Proxy};
@@ -10,23 +10,23 @@ use crate::{Client, State};
 
 pub struct Shm {
     pub wl_id_to_shm_id: HashMap<ObjectId, ShmPoolId>,
-    pub wl_id_to_buffer_id: HashMap<ObjectId, BufferId>,
+    pub wl_buffers: Vec<WlBuffer>,
 }
 
 impl Shm {
     pub fn new() -> Self {
         Self {
             wl_id_to_shm_id: HashMap::new(),
-            wl_id_to_buffer_id: HashMap::new(),
+            wl_buffers: Vec::new(),
         }
     }
 
-    pub fn destroy(&self, state: &mut State) {
-        for &buffer_id in self.wl_id_to_buffer_id.values() {
+    pub fn destroy(self, state: &mut State) {
+        for buffer in self.wl_buffers {
             state
                 .backend
                 .renderer_state()
-                .buffer_resource_destroyed(buffer_id);
+                .buffer_resource_destroyed(buffer);
         }
         for &pool_id in self.wl_id_to_shm_id.values() {
             state
@@ -69,8 +69,9 @@ fn wl_shm_pool_cb(ctx: RequestCtx<WlShmPool>) -> io::Result<()> {
     match ctx.request {
         Request::CreateBuffer(args) => {
             args.id.set_callback(wl_buffer_cb);
+            ctx.client.shm.wl_buffers.push(args.id.clone());
             let pool_id = ctx.client.shm.wl_id_to_shm_id[&ctx.proxy.id()];
-            let buffer_id = ctx.state.backend.renderer_state().create_shm_buffer(
+            ctx.state.backend.renderer_state().create_shm_buffer(
                 ShmBufferSpec {
                     pool_id,
                     offset: args.offset as u32,
@@ -79,12 +80,8 @@ fn wl_shm_pool_cb(ctx: RequestCtx<WlShmPool>) -> io::Result<()> {
                     stride: args.stride as u32,
                     wl_format: args.format as u32,
                 },
-                args.id.clone(),
+                args.id,
             );
-            ctx.client
-                .shm
-                .wl_id_to_buffer_id
-                .insert(args.id.id(), buffer_id);
         }
         Request::Destroy => {
             let pool_id = ctx
@@ -113,15 +110,10 @@ fn wl_shm_pool_cb(ctx: RequestCtx<WlShmPool>) -> io::Result<()> {
 
 fn wl_buffer_cb(ctx: RequestCtx<WlBuffer>) -> io::Result<()> {
     let wl_buffer::Request::Destroy = ctx.request;
-    let buffer_id = ctx
-        .client
-        .shm
-        .wl_id_to_buffer_id
-        .remove(&ctx.proxy.id())
-        .unwrap();
+    ctx.client.shm.wl_buffers.retain(|x| *x != ctx.proxy);
     ctx.state
         .backend
         .renderer_state()
-        .buffer_resource_destroyed(buffer_id);
+        .buffer_resource_destroyed(ctx.proxy);
     Ok(())
 }

@@ -347,13 +347,10 @@ fn wl_surface_cb(ctx: RequestCtx<WlSurface>) -> io::Result<()> {
                     surface.pending_buffer.take().and_then(|pending_buffer| {
                         if pending_buffer.is_alive() {
                             let buf_id = ctx
-                                .client
-                                .shm
-                                .wl_id_to_buffer_id
-                                .get(&pending_buffer.id())
-                                .copied()
-                                .unwrap();
-                            ctx.state.backend.renderer_state().buffer_lock(buf_id);
+                                .state
+                                .backend
+                                .renderer_state()
+                                .buffer_commited(pending_buffer);
                             let (width, height) =
                                 ctx.state.backend.renderer_state().get_buffer_size(buf_id);
                             Some((buf_id, width, height))

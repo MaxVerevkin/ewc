@@ -450,21 +450,10 @@ impl Backend for BackendImp {
         let (width, height) = self.buf_front.size();
         const FORMAT: wl_shm::Format = wl_shm::Format::Xrgb8888;
 
-        f(&mut FrameImp {
-            time: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as u32,
-            width,
-            height,
-            renderer: Renderer::new(
-                &self.renderer_state,
-                &mut self.temp_buf,
-                width,
-                height,
-                FORMAT as u32,
-            ),
-        });
+        f(self
+            .renderer_state
+            .frame(&mut self.temp_buf, width, height, FORMAT as u32)
+            .as_mut());
 
         // Reading from mapped buffer is terribly slow, but required for blending.
         // When blending is involved, rendering to a CPU buffer and then copying is much faster.
@@ -488,45 +477,5 @@ impl Backend for BackendImp {
         ) {
             eprintln!("drmkms: atomic nonblock page flip failed: {e:?}");
         };
-    }
-}
-
-struct FrameImp<'a> {
-    time: u32,
-    width: u32,
-    height: u32,
-    renderer: super::pixman_renderer::Renderer<'a>,
-}
-
-impl Frame for FrameImp<'_> {
-    fn time(&self) -> u32 {
-        self.time
-    }
-
-    fn width(&self) -> u32 {
-        self.width
-    }
-
-    fn height(&self) -> u32 {
-        self.height
-    }
-
-    fn clear(&mut self, r: f32, g: f32, b: f32) {
-        self.renderer.clear(r, g, b);
-    }
-
-    fn render_buffer(
-        &mut self,
-        buf: BufferId,
-        opaque_region: Option<&pixman::Region32>,
-        alpha: f32,
-        x: i32,
-        y: i32,
-    ) {
-        self.renderer.render_buffer(buf, opaque_region, alpha, x, y);
-    }
-
-    fn render_rect(&mut self, r: f32, g: f32, b: f32, a: f32, rect: pixman::Rectangle32) {
-        self.renderer.render_rect(r, g, b, a, rect);
     }
 }
