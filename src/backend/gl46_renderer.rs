@@ -19,8 +19,6 @@ pub struct RendererStateImp {
     fourcc: Fourcc,
     mods: Vec<u64>,
 
-    framebuffer: u32,
-    renderbuffer: u32,
     verts_buffer: u32,
     verts: Vec<Vert>,
 
@@ -68,8 +66,6 @@ impl RendererStateImp {
             gl
         };
 
-        let mut framebuffer = 0;
-        let mut renderbuffer = 0;
         let mut verts_buffer = 0;
         let mut vertex_array = 0;
         let shader;
@@ -78,14 +74,8 @@ impl RendererStateImp {
             gl.Enable(gl46::GL_BLEND);
             gl.BlendFunc(gl46::GL_ONE, gl46::GL_ONE_MINUS_SRC_ALPHA);
 
-            gl.GenFramebuffers(1, &mut framebuffer);
-            gl.GenRenderbuffers(1, &mut renderbuffer);
             gl.GenVertexArrays(1, &mut vertex_array);
             gl.CreateBuffers(1, &mut verts_buffer);
-
-            gl.BindFramebuffer(gl46::GL_FRAMEBUFFER, framebuffer);
-            gl.BindRenderbuffer(gl46::GL_RENDERBUFFER, renderbuffer);
-            gl.DrawBuffers(1, &gl46::GL_COLOR_ATTACHMENT0);
 
             gl.BindVertexArray(vertex_array);
             gl.BindVertexBuffer(0, verts_buffer, 0, std::mem::size_of::<Vert>() as i32);
@@ -127,45 +117,33 @@ impl RendererStateImp {
 
             bound_textures: 0,
 
-            framebuffer,
-            renderbuffer,
-
             gl: Box::new(gl),
             _context: egl_context,
             egl,
         })
     }
 
-    pub fn allocate_buffer(&mut self, width: u32, height: u32) -> (eglgbm::EglImage, BufferExport) {
-        eprintln!("allocating buffer {width}x{height}");
-        self.egl
+    pub fn allocate_framebuffer(&mut self, width: u32, height: u32) -> (Framebuffer, BufferExport) {
+        let (egl_image, export) = self
+            .egl
             .alloc_buffer(width, height, self.fourcc, &self.mods)
-            .unwrap()
+            .unwrap();
+        let fb = unsafe { Framebuffer::new(egl_image, &self.gl) };
+        (fb, export)
+    }
+
+    pub fn gl(&self) -> &gl46::GlFns {
+        &self.gl
     }
 
     pub fn frame<'a>(
         &'a mut self,
         width: u32,
         height: u32,
-        image: &eglgbm::EglImage,
+        fb: &Framebuffer,
     ) -> Box<dyn Frame + 'a> {
-        self.bound_textures = 0;
-
         unsafe {
-            image.set_as_gl_renderbuffer_storage();
-            self.gl.FramebufferRenderbuffer(
-                gl46::GL_FRAMEBUFFER,
-                gl46::GL_COLOR_ATTACHMENT0,
-                gl46::GL_RENDERBUFFER,
-                self.renderbuffer,
-            );
-
-            assert_eq!(
-                self.gl
-                    .CheckNamedFramebufferStatus(self.framebuffer, gl46::GL_FRAMEBUFFER),
-                gl46::GL_FRAMEBUFFER_COMPLETE
-            );
-
+            self.gl.BindFramebuffer(gl46::GL_FRAMEBUFFER, fb.fbo);
             self.gl.Viewport(0, 0, width as i32, height as i32);
             self.gl.Uniform2f(0, width as f32, height as f32);
         }
@@ -182,8 +160,13 @@ impl RendererStateImp {
     }
 
     pub fn finish_frame(&mut self) {
-        unsafe {
-            if !self.verts.is_empty() {
+        self.flush_quads();
+        unsafe { self.gl.Finish() };
+    }
+
+    fn flush_quads(&mut self) {
+        if !self.verts.is_empty() {
+            unsafe {
                 self.gl.NamedBufferData(
                     self.verts_buffer,
                     std::mem::size_of_val(self.verts.as_slice()) as isize,
@@ -192,10 +175,9 @@ impl RendererStateImp {
                 );
                 self.gl
                     .DrawArrays(gl46::GL_TRIANGLES, 0, self.verts.len() as i32);
-                self.verts.clear();
             }
-
-            self.gl.Finish();
+            self.verts.clear();
+            self.bound_textures = 0;
         }
     }
 
@@ -375,7 +357,11 @@ impl Frame for FrameImp<'_> {
         x: i32,
         y: i32,
     ) {
-        assert!(self.state.bound_textures < 32);
+        if self.state.bound_textures == 32 {
+            eprintln!("rendering more than 32 textures");
+            self.state.flush_quads();
+        }
+
         let tex = &self.state.textures[&buf];
         unsafe {
             self.state
@@ -438,6 +424,46 @@ struct Vert {
     g: f32,
     b: f32,
     a: f32,
+}
+
+pub struct Framebuffer {
+    fbo: u32,
+    rbo: u32,
+}
+
+impl Framebuffer {
+    pub fn destroy(self, gl: &gl46::GlFns) {
+        unsafe { gl.DeleteFramebuffers(1, &self.fbo) };
+        unsafe { gl.DeleteRenderbuffers(1, &self.rbo) };
+    }
+
+    unsafe fn new(egl_image: eglgbm::EglImage, gl: &gl46::GlFns) -> Self {
+        let mut fbo = 0;
+        let mut rbo = 0;
+
+        gl.GenFramebuffers(1, &mut fbo);
+        gl.GenRenderbuffers(1, &mut rbo);
+
+        gl.BindFramebuffer(gl46::GL_FRAMEBUFFER, fbo);
+        gl.BindRenderbuffer(gl46::GL_RENDERBUFFER, rbo);
+        gl.DrawBuffers(1, &gl46::GL_COLOR_ATTACHMENT0);
+
+        egl_image.set_as_gl_renderbuffer_storage();
+
+        gl.FramebufferRenderbuffer(
+            gl46::GL_FRAMEBUFFER,
+            gl46::GL_COLOR_ATTACHMENT0,
+            gl46::GL_RENDERBUFFER,
+            rbo,
+        );
+
+        assert_eq!(
+            gl.CheckNamedFramebufferStatus(fbo, gl46::GL_FRAMEBUFFER),
+            gl46::GL_FRAMEBUFFER_COMPLETE
+        );
+
+        Self { fbo, rbo }
+    }
 }
 
 fn select_format_from_feedback(

@@ -148,12 +148,10 @@ impl Backend for BackendImp {
             } => 'blk: {
                 if let Some(sw) = swapchain {
                     if sw.width != self.state.width || sw.height != self.state.height {
-                        eprintln!("destroying swapchain");
-                        for buf in &sw.bufs {
-                            eprintln!("destroying {:?}", buf.wl);
-                            buf.wl.destroy(&mut self.conn);
+                        let sw = swapchain.take().unwrap();
+                        for buf in sw.bufs {
+                            buf.destroy(&mut self.conn, state.gl());
                         }
-                        *swapchain = None;
                     }
                 }
 
@@ -166,7 +164,7 @@ impl Backend for BackendImp {
                 let buf = if let Some(buf) = sw.bufs.iter_mut().find(|buf| !buf.in_use) {
                     buf
                 } else if sw.bufs.len() < 2 {
-                    let (egl_image, export) = state.allocate_buffer(sw.width, sw.height);
+                    let (fb, export) = state.allocate_framebuffer(sw.width, sw.height);
                     let params = linux_dmabuf.create_params(&mut self.conn);
                     for (i, plane) in export.planes.into_iter().enumerate() {
                         params.add(
@@ -190,7 +188,7 @@ impl Backend for BackendImp {
                     params.destroy(&mut self.conn);
                     sw.bufs.push(GlBuf {
                         wl,
-                        egl_image,
+                        fb,
                         in_use: false,
                     });
                     sw.bufs.last_mut().unwrap()
@@ -200,7 +198,7 @@ impl Backend for BackendImp {
                 };
                 assert!(!buf.in_use);
 
-                f(state.frame(sw.width, sw.height, &buf.egl_image).as_mut());
+                f(state.frame(sw.width, sw.height, &buf.fb).as_mut());
                 state.finish_frame();
 
                 buf.in_use = true;
@@ -251,11 +249,17 @@ enum RendererKind {
     },
 }
 
-#[derive(Debug)]
 struct GlBuf {
     wl: WlBuffer,
-    egl_image: eglgbm::EglImage,
+    fb: gl46_renderer::Framebuffer,
     in_use: bool,
+}
+
+impl GlBuf {
+    fn destroy(self, conn: &mut Connection<State>, gl: &gl46::GlFns) {
+        self.wl.destroy(conn);
+        self.fb.destroy(gl);
+    }
 }
 
 struct GlSwapchain {
