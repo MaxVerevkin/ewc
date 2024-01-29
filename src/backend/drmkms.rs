@@ -210,7 +210,7 @@ pub fn new() -> Option<Box<dyn Backend>> {
         plane,
         plane_props,
         backend_events_queue: VecDeque::new(),
-        renderer_state: RendererState::new(),
+        renderer_state: RendererStateImp::new(),
     }))
 }
 
@@ -228,7 +228,7 @@ struct BackendImp {
     plane: drm::control::plane::Handle,
     plane_props: HashMap<String, drm::control::property::Info>,
     backend_events_queue: VecDeque<BackendEvent>,
-    renderer_state: RendererState,
+    renderer_state: RendererStateImp,
 }
 
 struct LibinputIface {
@@ -435,40 +435,8 @@ impl Backend for BackendImp {
         self.seat.switch_session(vt as i32).unwrap();
     }
 
-    fn create_shm_pool(&mut self, fd: OwnedFd, size: usize) -> ShmPoolId {
-        self.renderer_state.create_shm_pool(fd, size)
-    }
-
-    fn resize_shm_pool(&mut self, pool_id: ShmPoolId, new_size: usize) {
-        self.renderer_state.resize_shm_pool(pool_id, new_size)
-    }
-
-    fn shm_pool_resource_destroyed(&mut self, pool_id: ShmPoolId) {
-        self.renderer_state.shm_pool_resource_destroyed(pool_id)
-    }
-
-    fn create_shm_buffer(
-        &mut self,
-        spec: ShmBufferSpec,
-        resource: crate::protocol::WlBuffer,
-    ) -> BufferId {
-        self.renderer_state.create_shm_buffer(spec, resource)
-    }
-
-    fn get_buffer_size(&self, buffer_id: BufferId) -> (u32, u32) {
-        self.renderer_state.get_buffer_size(buffer_id)
-    }
-
-    fn buffer_lock(&mut self, buffer_id: BufferId) {
-        self.renderer_state.buffer_lock(buffer_id)
-    }
-
-    fn buffer_unlock(&mut self, buffer_id: BufferId) {
-        self.renderer_state.buffer_unlock(buffer_id)
-    }
-
-    fn buffer_resource_destroyed(&mut self, buffer_id: BufferId) {
-        self.renderer_state.buffer_resource_destroyed(buffer_id)
+    fn renderer_state(&mut self) -> &mut dyn RendererState {
+        &mut self.renderer_state
     }
 
     fn render_frame(&mut self, f: &mut dyn FnMut(&mut dyn Frame)) {

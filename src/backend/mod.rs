@@ -14,6 +14,11 @@ pub trait Backend {
     fn poll(&mut self, data: u32) -> io::Result<()>;
     fn next_event(&mut self) -> Option<BackendEvent>;
     fn switch_vt(&mut self, vt: u32);
+    fn renderer_state(&mut self) -> &mut dyn RendererState;
+    fn render_frame(&mut self, f: &mut dyn FnMut(&mut dyn Frame));
+}
+
+pub trait RendererState {
     fn create_shm_pool(&mut self, fd: OwnedFd, size: usize) -> ShmPoolId;
     fn resize_shm_pool(&mut self, pool_id: ShmPoolId, new_size: usize);
     fn shm_pool_resource_destroyed(&mut self, pool_id: ShmPoolId);
@@ -26,7 +31,6 @@ pub trait Backend {
     fn buffer_lock(&mut self, buffer_id: BufferId);
     fn buffer_unlock(&mut self, buffer_id: BufferId);
     fn buffer_resource_destroyed(&mut self, buffer_id: BufferId);
-    fn render_frame(&mut self, f: &mut dyn FnMut(&mut dyn Frame));
 }
 
 pub struct ShmBufferSpec {

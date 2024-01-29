@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::io;
 use std::num::NonZeroU64;
-use std::os::fd::{AsRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsRawFd, RawFd};
 
 use wayrs_client::global::GlobalsExt;
 use wayrs_client::proxy::Proxy as _;
@@ -18,7 +18,7 @@ use super::*;
 struct BackendImp {
     conn: Connection<State>,
     state: State,
-    renderer_state: RendererState,
+    renderer_state: RendererStateImp,
 }
 
 pub fn new() -> Option<Box<dyn Backend>> {
@@ -84,7 +84,7 @@ pub fn new() -> Option<Box<dyn Backend>> {
     Some(Box::new(BackendImp {
         conn,
         state,
-        renderer_state: RendererState::new(),
+        renderer_state: RendererStateImp::new(),
     }))
 }
 
@@ -112,40 +112,8 @@ impl Backend for BackendImp {
 
     fn switch_vt(&mut self, _vt: u32) {}
 
-    fn create_shm_pool(&mut self, fd: OwnedFd, size: usize) -> ShmPoolId {
-        self.renderer_state.create_shm_pool(fd, size)
-    }
-
-    fn resize_shm_pool(&mut self, pool_id: ShmPoolId, new_size: usize) {
-        self.renderer_state.resize_shm_pool(pool_id, new_size)
-    }
-
-    fn shm_pool_resource_destroyed(&mut self, pool_id: ShmPoolId) {
-        self.renderer_state.shm_pool_resource_destroyed(pool_id)
-    }
-
-    fn create_shm_buffer(
-        &mut self,
-        spec: ShmBufferSpec,
-        resource: crate::protocol::WlBuffer,
-    ) -> BufferId {
-        self.renderer_state.create_shm_buffer(spec, resource)
-    }
-
-    fn get_buffer_size(&self, buffer_id: BufferId) -> (u32, u32) {
-        self.renderer_state.get_buffer_size(buffer_id)
-    }
-
-    fn buffer_lock(&mut self, buffer_id: BufferId) {
-        self.renderer_state.buffer_lock(buffer_id)
-    }
-
-    fn buffer_unlock(&mut self, buffer_id: BufferId) {
-        self.renderer_state.buffer_unlock(buffer_id)
-    }
-
-    fn buffer_resource_destroyed(&mut self, buffer_id: BufferId) {
-        self.renderer_state.buffer_resource_destroyed(buffer_id)
+    fn renderer_state(&mut self) -> &mut dyn RendererState {
+        &mut self.renderer_state
     }
 
     fn render_frame(&mut self, f: &mut dyn FnMut(&mut dyn Frame)) {

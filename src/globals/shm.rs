@@ -23,10 +23,16 @@ impl Shm {
 
     pub fn destroy(&self, state: &mut State) {
         for &buffer_id in self.wl_id_to_buffer_id.values() {
-            state.backend.buffer_resource_destroyed(buffer_id);
+            state
+                .backend
+                .renderer_state()
+                .buffer_resource_destroyed(buffer_id);
         }
         for &pool_id in self.wl_id_to_shm_id.values() {
-            state.backend.shm_pool_resource_destroyed(pool_id);
+            state
+                .backend
+                .renderer_state()
+                .shm_pool_resource_destroyed(pool_id);
         }
     }
 }
@@ -50,6 +56,7 @@ fn wl_shm_cb(ctx: RequestCtx<WlShm>) -> io::Result<()> {
             let shm_id = ctx
                 .state
                 .backend
+                .renderer_state()
                 .create_shm_pool(args.fd, args.size as usize);
             ctx.client.shm.wl_id_to_shm_id.insert(args.id.id(), shm_id);
         }
@@ -63,7 +70,7 @@ fn wl_shm_pool_cb(ctx: RequestCtx<WlShmPool>) -> io::Result<()> {
         Request::CreateBuffer(args) => {
             args.id.set_callback(wl_buffer_cb);
             let pool_id = ctx.client.shm.wl_id_to_shm_id[&ctx.proxy.id()];
-            let buffer_id = ctx.state.backend.create_shm_buffer(
+            let buffer_id = ctx.state.backend.renderer_state().create_shm_buffer(
                 ShmBufferSpec {
                     pool_id,
                     offset: args.offset as u32,
@@ -86,13 +93,17 @@ fn wl_shm_pool_cb(ctx: RequestCtx<WlShmPool>) -> io::Result<()> {
                 .wl_id_to_shm_id
                 .remove(&ctx.proxy.id())
                 .unwrap();
-            ctx.state.backend.shm_pool_resource_destroyed(pool_id);
+            ctx.state
+                .backend
+                .renderer_state()
+                .shm_pool_resource_destroyed(pool_id);
         }
         Request::Resize(new_size) => {
             if new_size > 0 {
                 let pool_id = ctx.client.shm.wl_id_to_shm_id[&ctx.proxy.id()];
                 ctx.state
                     .backend
+                    .renderer_state()
                     .resize_shm_pool(pool_id, new_size as usize);
             }
         }
@@ -108,6 +119,9 @@ fn wl_buffer_cb(ctx: RequestCtx<WlBuffer>) -> io::Result<()> {
         .wl_id_to_buffer_id
         .remove(&ctx.proxy.id())
         .unwrap();
-    ctx.state.backend.buffer_resource_destroyed(buffer_id);
+    ctx.state
+        .backend
+        .renderer_state()
+        .buffer_resource_destroyed(buffer_id);
     Ok(())
 }

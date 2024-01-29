@@ -56,7 +56,7 @@ impl SurfaceState {
         dst.mask.0 |= self.mask.0;
         if self.mask.contains(CommittedMaskBit::Buffer) {
             if let Some((old_buf, _, _)) = dst.buffer {
-                state.backend.buffer_unlock(old_buf);
+                state.backend.renderer_state().buffer_unlock(old_buf);
             }
             dst.buffer = self.buffer.take();
         }
@@ -353,8 +353,9 @@ fn wl_surface_cb(ctx: RequestCtx<WlSurface>) -> io::Result<()> {
                                 .get(&pending_buffer.id())
                                 .copied()
                                 .unwrap();
-                            ctx.state.backend.buffer_lock(buf_id);
-                            let (width, height) = ctx.state.backend.get_buffer_size(buf_id);
+                            ctx.state.backend.renderer_state().buffer_lock(buf_id);
+                            let (width, height) =
+                                ctx.state.backend.renderer_state().get_buffer_size(buf_id);
                             Some((buf_id, width, height))
                         } else {
                             None
