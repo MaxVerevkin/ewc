@@ -25,7 +25,7 @@ jobs:
       image: archlinux
     steps:
       - name: Get required packages
-        run: pacman --noconfirm --noprogressbar -Syu git gcc pkgconf libxkbcommon seatd libinput pixman
+        run: pacman --noconfirm --noprogressbar -Syu git gcc pkgconf libxkbcommon seatd libinput pixman mesa
       - uses: actions/checkout@v4
         with:
           submodules: recursive
