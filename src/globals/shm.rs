@@ -37,9 +37,10 @@ impl Shm {
 }
 
 impl IsGlobal for WlShm {
-    fn on_bind(&self, _client: &mut Client, _state: &mut State) {
-        self.format(wl_shm::Format::Argb8888);
-        self.format(wl_shm::Format::Abgr8888);
+    fn on_bind(&self, _client: &mut Client, state: &mut State) {
+        for &format in state.backend.renderer_state().supported_shm_formats() {
+            self.format(format);
+        }
         self.set_callback(wl_shm_cb);
     }
 }
@@ -67,6 +68,15 @@ fn wl_shm_pool_cb(ctx: RequestCtx<WlShmPool>) -> io::Result<()> {
     use wl_shm_pool::Request;
     match ctx.request {
         Request::CreateBuffer(args) => {
+            if !ctx
+                .state
+                .backend
+                .renderer_state()
+                .supported_shm_formats()
+                .contains(&args.format)
+            {
+                return Err(io::Error::other("provided unsupported shm format"));
+            }
             args.id.set_callback(wl_buffer_cb);
             ctx.client.shm.wl_buffers.push(args.id.clone());
             ctx.state.backend.renderer_state().create_shm_buffer(
@@ -76,7 +86,7 @@ fn wl_shm_pool_cb(ctx: RequestCtx<WlShmPool>) -> io::Result<()> {
                     width: args.width as u32,
                     height: args.height as u32,
                     stride: args.stride as u32,
-                    wl_format: args.format as u32,
+                    wl_format: args.format,
                 },
                 args.id,
             );

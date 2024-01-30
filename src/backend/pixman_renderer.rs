@@ -37,7 +37,7 @@ impl RendererStateImp {
         bytes: &'a mut [u8],
         width: u32,
         height: u32,
-        wl_format: u32,
+        wl_format: wl_shm::Format,
     ) -> Box<dyn Frame + 'a> {
         Box::new(FrameImp {
             time: std::time::SystemTime::now()
@@ -75,6 +75,10 @@ impl RendererStateImp {
 }
 
 impl RendererState for RendererStateImp {
+    fn supported_shm_formats(&self) -> &[protocol::wl_shm::Format] {
+        &[wl_shm::Format::Argb8888, wl_shm::Format::Xrgb8888]
+    }
+
     fn create_shm_pool(&mut self, fd: OwnedFd, size: usize, resource: WlShmPool) {
         self.shm_pools.insert(
             resource,
@@ -273,12 +277,13 @@ fn bytes_to_ints(bytes: &mut [u8]) -> &mut [u32] {
     unsafe { std::slice::from_raw_parts_mut(bytes.as_mut_ptr().cast(), bytes.len() / 4) }
 }
 
-fn wl_format_to_pixman(format: u32) -> Option<pixman::FormatCode> {
+fn wl_format_to_pixman(format: wl_shm::Format) -> Option<pixman::FormatCode> {
     use pixman::FormatCode as Pix;
+    use wl_shm::Format as Wl;
     match format {
-        0 => Some(Pix::A8R8G8B8),
-        1 => Some(Pix::X8R8G8B8),
-        0x34324241 => Some(Pix::A8B8G8R8),
+        Wl::Argb8888 => Some(Pix::A8R8G8B8),
+        Wl::Xrgb8888 => Some(Pix::X8R8G8B8),
+        // 0x34324241 => Some(Pix::A8B8G8R8),
         _ => None,
     }
 }

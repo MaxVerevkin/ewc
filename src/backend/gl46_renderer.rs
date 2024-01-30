@@ -213,6 +213,10 @@ impl RendererStateImp {
 }
 
 impl RendererState for RendererStateImp {
+    fn supported_shm_formats(&self) -> &[protocol::wl_shm::Format] {
+        &[wl_shm::Format::Argb8888, wl_shm::Format::Xrgb8888]
+    }
+
     fn create_shm_pool(&mut self, fd: OwnedFd, size: usize, resource: WlShmPool) {
         self.shm_pools.insert(
             resource,
@@ -276,12 +280,10 @@ impl RendererState for RendererStateImp {
             self.gl.TextureStorage2D(
                 tex,
                 1,
-                if spec.wl_format == wl_shm::Format::Argb8888 as u32 {
-                    gl46::GL_RGBA8
-                } else if spec.wl_format == wl_shm::Format::Xrgb8888 as u32 {
-                    gl46::GL_RGB8
-                } else {
-                    panic!("unsupported wl format")
+                match spec.wl_format {
+                    wl_shm::Format::Argb8888 => gl46::GL_RGBA8,
+                    wl_shm::Format::Xrgb8888 => gl46::GL_RGB8,
+                    _ => panic!("unsupported wl format"),
                 },
                 spec.width as i32,
                 spec.height as i32,

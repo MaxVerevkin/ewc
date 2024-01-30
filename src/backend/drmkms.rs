@@ -525,7 +525,7 @@ impl Backend for BackendImp {
                 let (width, height) = swapchain[0].size();
                 const FORMAT: wl_shm::Format = wl_shm::Format::Xrgb8888;
 
-                f(state.frame(temp_buf, width, height, FORMAT as u32).as_mut());
+                f(state.frame(temp_buf, width, height, FORMAT).as_mut());
 
                 // Reading from mapped buffer is terribly slow, but required for blending.
                 // When blending is involved, rendering to a CPU buffer and then copying is much faster.

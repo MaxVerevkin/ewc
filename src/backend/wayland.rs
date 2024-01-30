@@ -111,7 +111,6 @@ impl Backend for BackendImp {
     }
 
     fn render_frame(&mut self, f: &mut dyn FnMut(&mut dyn Frame)) {
-        const FORMAT: wl_shm::Format = wl_shm::Format::Argb8888;
         assert!(self.state.mapped);
         assert!(self.state.throttle_cb.is_none());
 
@@ -131,11 +130,16 @@ impl Backend for BackendImp {
                         width: self.state.width,
                         height: self.state.height,
                         stride: self.state.width * 4,
-                        format: FORMAT,
+                        format: wl_shm::Format::Argb8888,
                     },
                 );
                 f(state
-                    .frame(canvas, self.state.width, self.state.height, FORMAT as u32)
+                    .frame(
+                        canvas,
+                        self.state.width,
+                        self.state.height,
+                        crate::protocol::wl_shm::Format::Argb8888,
+                    )
                     .as_mut());
                 self.state
                     .wl_surface

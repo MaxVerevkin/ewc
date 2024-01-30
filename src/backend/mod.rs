@@ -23,6 +23,7 @@ pub trait Backend {
 }
 
 pub trait RendererState: Any {
+    fn supported_shm_formats(&self) -> &[protocol::wl_shm::Format];
     fn create_shm_pool(&mut self, fd: OwnedFd, size: usize, resource: protocol::WlShmPool);
     fn resize_shm_pool(&mut self, pool: protocol::WlShmPool, new_size: usize);
     fn shm_pool_resource_destroyed(&mut self, pool: protocol::WlShmPool);
@@ -40,7 +41,7 @@ pub struct ShmBufferSpec {
     pub width: u32,
     pub height: u32,
     pub stride: u32,
-    pub wl_format: u32,
+    pub wl_format: protocol::wl_shm::Format,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
