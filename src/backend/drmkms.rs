@@ -334,7 +334,7 @@ impl Drop for BackendImp {
         match &self.renderer_kind {
             RendererKind::Pixman { swapchain, .. } => {
                 self.card.destroy_dumb_buffer(swapchain[0]).unwrap();
-                self.card.destroy_dumb_buffer(swapchain[0]).unwrap();
+                self.card.destroy_dumb_buffer(swapchain[1]).unwrap();
             }
             RendererKind::OpenGl {
                 swapchain, state, ..
