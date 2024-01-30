@@ -23,6 +23,7 @@ pub struct RendererStateImp {
     verts: Vec<Vert>,
 
     bound_textures: u32,
+    texture_units: u32,
 
     gl: Box<gl46::GlFns>,
     _context: eglgbm::EglContext,
@@ -83,6 +84,15 @@ impl RendererStateImp {
         let mut vertex_array = 0;
         let shader;
 
+        let texture_units = {
+            let mut n = 0;
+            unsafe { gl.GetIntegerv(gl46::GL_MAX_TEXTURE_IMAGE_UNITS, &mut n) };
+            assert!(n >= 16);
+            n as u32
+        };
+
+        eprintln!("gl46_renderer: {texture_units} texture units available");
+
         unsafe {
             gl.Enable(gl46::GL_BLEND);
             gl.BlendFunc(gl46::GL_ONE, gl46::GL_ONE_MINUS_SRC_ALPHA);
@@ -99,11 +109,11 @@ impl RendererStateImp {
             gl.VertexAttribFormat(0, 2, gl46::GL_FLOAT, 0, 0);
             gl.VertexAttribFormat(1, 4, gl46::GL_FLOAT, 0, 8);
 
-            shader = create_shader(&gl);
+            shader = create_shader(&gl, texture_units);
             gl.UseProgram(shader);
 
-            let units = std::array::from_fn::<i32, 32, _>(|i| i as i32);
-            gl.Uniform1iv(1, 32, units.as_ptr());
+            let units: Vec<_> = (0..texture_units as i32).collect();
+            gl.Uniform1iv(1, units.len() as i32, units.as_ptr());
         }
 
         let (fourcc, mods) = match feedback {
@@ -122,6 +132,7 @@ impl RendererStateImp {
             verts_buffer,
             verts: Vec::new(),
 
+            texture_units,
             bound_textures: 0,
 
             gl: Box::new(gl),
@@ -369,8 +380,7 @@ impl Frame for FrameImp<'_> {
         x: i32,
         y: i32,
     ) {
-        if self.state.bound_textures == 32 {
-            eprintln!("rendering more than 32 textures");
+        if self.state.bound_textures == self.state.texture_units {
             self.state.flush_quads();
         }
 
@@ -530,7 +540,7 @@ fn select_format_from_format_table(
     )
 }
 
-unsafe fn create_shader(gl: &gl46::GlFns) -> u32 {
+unsafe fn create_shader(gl: &gl46::GlFns, texture_units: u32) -> u32 {
     let vertex_shader = b"
         #version 460 core
         layout(location = 0) in vec2 a_Pos;
@@ -542,19 +552,20 @@ unsafe fn create_shader(gl: &gl46::GlFns) -> u32 {
             v_Color = a_Color;
         }\0";
 
-    let fragment_shader = b"
-        #version 460 core
+    let fragment_shader = format!(
+        "#version 460 core
         in vec4 v_Color;
         out vec4 frag_color;
-        layout(location = 1) uniform sampler2D u_Textures[32];
-        void main() {
-            if (v_Color.a < 0.0) {
+        layout(location = 1) uniform sampler2D u_Textures[{texture_units}];
+        void main() {{
+            if (v_Color.a < 0.0) {{
                 int tex_i = int(v_Color.b);
                 frag_color = texture(u_Textures[tex_i], v_Color.rg) * (-1.0 - v_Color.a);
-            } else {
+            }} else {{
                 frag_color = v_Color;
-            }
-        }\0";
+            }}
+        }}\0"
+    );
 
     let vs = gl.CreateShader(gl46::GL_VERTEX_SHADER);
     gl.ShaderSource(vs, 1, &(vertex_shader.as_ptr() as _), std::ptr::null());
