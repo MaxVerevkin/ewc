@@ -2,10 +2,11 @@ use std::collections::HashMap;
 use std::num::NonZeroU64;
 
 use super::*;
+use crate::{protocol::*, Proxy};
 
 pub struct RendererStateImp {
-    shm_pools: HashMap<ShmPoolId, ShmPool>,
-    resource_mapping: HashMap<crate::protocol::WlBuffer, BufferId>,
+    shm_pools: HashMap<WlShmPool, ShmPool>,
+    resource_mapping: HashMap<WlBuffer, BufferId>,
     shm_buffers: HashMap<BufferId, ShmBuffer>,
     next_id: NonZeroU64,
 }
@@ -13,13 +14,12 @@ pub struct RendererStateImp {
 struct ShmPool {
     memmap: memmap2::Mmap,
     size: usize,
-    resource_alive: bool,
 }
 
 struct ShmBuffer {
     spec: ShmBufferSpec,
     locks: u32,
-    resource: Option<crate::protocol::WlBuffer>,
+    resource: Option<WlBuffer>,
 }
 
 impl RendererStateImp {
@@ -59,42 +59,34 @@ impl RendererStateImp {
         })
     }
 
-    fn consider_dropping_shm_pool(&mut self, pool_id: ShmPoolId) {
-        let shm_pool = self.shm_pools.get(&pool_id).unwrap();
-        if !shm_pool.resource_alive
-            && self
-                .shm_buffers
-                .values()
-                .all(|buf| buf.spec.pool_id != pool_id)
-        {
-            self.shm_pools.remove(&pool_id);
-        }
-    }
-
     fn drop_buffer(&mut self, buffer_id: BufferId) {
         let buffer = self.shm_buffers.remove(&buffer_id).unwrap();
         assert_eq!(buffer.locks, 0);
         assert!(buffer.resource.is_none());
-        self.consider_dropping_shm_pool(buffer.spec.pool_id);
+        if !buffer.spec.pool.is_alive()
+            && self
+                .shm_buffers
+                .values()
+                .all(|buf| buf.spec.pool != buffer.spec.pool)
+        {
+            self.shm_pools.remove(&buffer.spec.pool);
+        }
     }
 }
 
 impl RendererState for RendererStateImp {
-    fn create_shm_pool(&mut self, fd: OwnedFd, size: usize) -> ShmPoolId {
-        let id = ShmPoolId(next_id(&mut self.next_id));
+    fn create_shm_pool(&mut self, fd: OwnedFd, size: usize, resource: WlShmPool) {
         self.shm_pools.insert(
-            id,
+            resource,
             ShmPool {
                 memmap: unsafe { memmap2::MmapOptions::new().len(size).map(&fd).unwrap() },
                 size,
-                resource_alive: true,
             },
         );
-        id
     }
 
-    fn resize_shm_pool(&mut self, pool_id: ShmPoolId, new_size: usize) {
-        let pool = self.shm_pools.get_mut(&pool_id).unwrap();
+    fn resize_shm_pool(&mut self, pool: WlShmPool, new_size: usize) {
+        let pool = self.shm_pools.get_mut(&pool).unwrap();
         if new_size > pool.size {
             pool.size = new_size;
             unsafe {
@@ -105,12 +97,13 @@ impl RendererState for RendererStateImp {
         }
     }
 
-    fn shm_pool_resource_destroyed(&mut self, pool_id: ShmPoolId) {
-        self.shm_pools.get_mut(&pool_id).unwrap().resource_alive = false;
-        self.consider_dropping_shm_pool(pool_id);
+    fn shm_pool_resource_destroyed(&mut self, pool: WlShmPool) {
+        if self.shm_buffers.values().all(|buf| buf.spec.pool != pool) {
+            self.shm_pools.remove(&pool);
+        }
     }
 
-    fn create_shm_buffer(&mut self, spec: ShmBufferSpec, resource: crate::protocol::WlBuffer) {
+    fn create_shm_buffer(&mut self, spec: ShmBufferSpec, resource: WlBuffer) {
         let id = BufferId(next_id(&mut self.next_id));
         self.resource_mapping.insert(resource.clone(), id);
         self.shm_buffers.insert(
@@ -123,7 +116,7 @@ impl RendererState for RendererStateImp {
         );
     }
 
-    fn buffer_commited(&mut self, resource: crate::protocol::WlBuffer) -> BufferId {
+    fn buffer_commited(&mut self, resource: WlBuffer) -> BufferId {
         let buffer_id = *self.resource_mapping.get(&resource).unwrap();
         self.buffer_lock(buffer_id);
         buffer_id
@@ -153,7 +146,7 @@ impl RendererState for RendererStateImp {
         }
     }
 
-    fn buffer_resource_destroyed(&mut self, resource: crate::protocol::WlBuffer) {
+    fn buffer_resource_destroyed(&mut self, resource: WlBuffer) {
         let buffer_id = self.resource_mapping.remove(&resource).unwrap();
         let buf = self.shm_buffers.get_mut(&buffer_id).unwrap();
         buf.resource = None;
@@ -208,7 +201,7 @@ impl Frame for FrameImp<'_> {
         y: i32,
     ) {
         let buf = &self.state.shm_buffers[&buf];
-        let pool = &self.state.shm_pools[&buf.spec.pool_id];
+        let pool = &self.state.shm_pools[&buf.spec.pool];
         let spec = &buf.spec;
         let bytes =
             &pool.memmap[spec.offset as usize..][..spec.stride as usize * spec.height as usize];

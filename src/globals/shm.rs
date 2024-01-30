@@ -1,22 +1,21 @@
-use std::collections::HashMap;
 use std::io;
 
 use super::IsGlobal;
-use crate::backend::{ShmBufferSpec, ShmPoolId};
+use crate::backend::ShmBufferSpec;
 use crate::client::RequestCtx;
 use crate::protocol::*;
-use crate::wayland_core::{ObjectId, Proxy};
+use crate::wayland_core::Proxy;
 use crate::{Client, State};
 
 pub struct Shm {
-    pub wl_id_to_shm_id: HashMap<ObjectId, ShmPoolId>,
+    pub shm_pools: Vec<WlShmPool>,
     pub wl_buffers: Vec<WlBuffer>,
 }
 
 impl Shm {
     pub fn new() -> Self {
         Self {
-            wl_id_to_shm_id: HashMap::new(),
+            shm_pools: Vec::new(),
             wl_buffers: Vec::new(),
         }
     }
@@ -28,11 +27,11 @@ impl Shm {
                 .renderer_state()
                 .buffer_resource_destroyed(buffer);
         }
-        for &pool_id in self.wl_id_to_shm_id.values() {
+        for pool in self.shm_pools {
             state
                 .backend
                 .renderer_state()
-                .shm_pool_resource_destroyed(pool_id);
+                .shm_pool_resource_destroyed(pool);
         }
     }
 }
@@ -53,12 +52,12 @@ fn wl_shm_cb(ctx: RequestCtx<WlShm>) -> io::Result<()> {
             if args.size <= 0 {
                 return Err(io::Error::other("poll must be greater than zero"));
             }
-            let shm_id = ctx
-                .state
-                .backend
-                .renderer_state()
-                .create_shm_pool(args.fd, args.size as usize);
-            ctx.client.shm.wl_id_to_shm_id.insert(args.id.id(), shm_id);
+            ctx.state.backend.renderer_state().create_shm_pool(
+                args.fd,
+                args.size as usize,
+                args.id.clone(),
+            );
+            ctx.client.shm.shm_pools.push(args.id);
         }
     }
     Ok(())
@@ -70,10 +69,9 @@ fn wl_shm_pool_cb(ctx: RequestCtx<WlShmPool>) -> io::Result<()> {
         Request::CreateBuffer(args) => {
             args.id.set_callback(wl_buffer_cb);
             ctx.client.shm.wl_buffers.push(args.id.clone());
-            let pool_id = ctx.client.shm.wl_id_to_shm_id[&ctx.proxy.id()];
             ctx.state.backend.renderer_state().create_shm_buffer(
                 ShmBufferSpec {
-                    pool_id,
+                    pool: ctx.proxy,
                     offset: args.offset as u32,
                     width: args.width as u32,
                     height: args.height as u32,
@@ -84,24 +82,18 @@ fn wl_shm_pool_cb(ctx: RequestCtx<WlShmPool>) -> io::Result<()> {
             );
         }
         Request::Destroy => {
-            let pool_id = ctx
-                .client
-                .shm
-                .wl_id_to_shm_id
-                .remove(&ctx.proxy.id())
-                .unwrap();
+            ctx.client.shm.shm_pools.retain(|x| *x != ctx.proxy);
             ctx.state
                 .backend
                 .renderer_state()
-                .shm_pool_resource_destroyed(pool_id);
+                .shm_pool_resource_destroyed(ctx.proxy);
         }
         Request::Resize(new_size) => {
             if new_size > 0 {
-                let pool_id = ctx.client.shm.wl_id_to_shm_id[&ctx.proxy.id()];
                 ctx.state
                     .backend
                     .renderer_state()
-                    .resize_shm_pool(pool_id, new_size as usize);
+                    .resize_shm_pool(ctx.proxy, new_size as usize);
             }
         }
     }

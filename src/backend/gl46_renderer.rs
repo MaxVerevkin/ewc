@@ -6,13 +6,15 @@ use wayrs_protocols::linux_dmabuf_unstable_v1::zwp_linux_dmabuf_feedback_v1::Tra
 use wayrs_utils::dmabuf_feedback::DmabufFeedback;
 
 use super::*;
+use crate::protocol::*;
 use crate::wl_shm;
+use crate::Proxy;
 
 const DRM_FORMAT_XRGB8888: Fourcc = Fourcc(u32::from_le_bytes(*b"XR24"));
 
 pub struct RendererStateImp {
-    shm_pools: HashMap<ShmPoolId, ShmPool>,
-    shm_buffers: HashMap<crate::protocol::WlBuffer, ShmBufferSpec>,
+    shm_pools: HashMap<WlShmPool, ShmPool>,
+    shm_buffers: HashMap<WlBuffer, ShmBufferSpec>,
     textures: HashMap<BufferId, Texture>,
     next_id: NonZeroU64,
 
@@ -33,7 +35,6 @@ pub struct RendererStateImp {
 struct ShmPool {
     memmap: memmap2::Mmap,
     size: usize,
-    resource_alive: bool,
     refcnt: usize,
 }
 
@@ -204,13 +205,6 @@ impl RendererStateImp {
         }
     }
 
-    fn consider_dropping_shm_pool(&mut self, pool_id: ShmPoolId) {
-        let shm_pool = self.shm_pools.get(&pool_id).unwrap();
-        if !shm_pool.resource_alive && shm_pool.refcnt == 0 {
-            self.shm_pools.remove(&pool_id);
-        }
-    }
-
     fn drop_buffer(&mut self, buffer_id: BufferId) {
         let buffer = self.textures.remove(&buffer_id).unwrap();
         assert_eq!(buffer.locks, 0);
@@ -219,22 +213,19 @@ impl RendererStateImp {
 }
 
 impl RendererState for RendererStateImp {
-    fn create_shm_pool(&mut self, fd: OwnedFd, size: usize) -> ShmPoolId {
-        let id = ShmPoolId(next_id(&mut self.next_id));
+    fn create_shm_pool(&mut self, fd: OwnedFd, size: usize, resource: WlShmPool) {
         self.shm_pools.insert(
-            id,
+            resource,
             ShmPool {
                 memmap: unsafe { memmap2::MmapOptions::new().len(size).map(&fd).unwrap() },
                 size,
-                resource_alive: true,
                 refcnt: 0,
             },
         );
-        id
     }
 
-    fn resize_shm_pool(&mut self, pool_id: ShmPoolId, new_size: usize) {
-        let pool = self.shm_pools.get_mut(&pool_id).unwrap();
+    fn resize_shm_pool(&mut self, pool: WlShmPool, new_size: usize) {
+        let pool = self.shm_pools.get_mut(&pool).unwrap();
         if new_size > pool.size {
             pool.size = new_size;
             unsafe {
@@ -245,21 +236,23 @@ impl RendererState for RendererStateImp {
         }
     }
 
-    fn shm_pool_resource_destroyed(&mut self, pool_id: ShmPoolId) {
-        self.shm_pools.get_mut(&pool_id).unwrap().resource_alive = false;
-        self.consider_dropping_shm_pool(pool_id);
+    fn shm_pool_resource_destroyed(&mut self, pool: WlShmPool) {
+        let shm_pool = self.shm_pools.get_mut(&pool).unwrap();
+        if shm_pool.refcnt == 0 {
+            self.shm_pools.remove(&pool);
+        }
     }
 
-    fn create_shm_buffer(&mut self, spec: ShmBufferSpec, resource: crate::protocol::WlBuffer) {
-        self.shm_pools.get_mut(&spec.pool_id).unwrap().refcnt += 1;
+    fn create_shm_buffer(&mut self, spec: ShmBufferSpec, resource: WlBuffer) {
+        self.shm_pools.get_mut(&spec.pool).unwrap().refcnt += 1;
         self.shm_buffers.insert(resource, spec);
     }
 
-    fn buffer_commited(&mut self, buffer_resource: crate::protocol::WlBuffer) -> BufferId {
+    fn buffer_commited(&mut self, buffer_resource: WlBuffer) -> BufferId {
         let spec = self.shm_buffers.get(&buffer_resource).unwrap();
 
         buffer_resource.release();
-        let pool = &self.shm_pools[&spec.pool_id];
+        let pool = &self.shm_pools[&spec.pool];
         let bytes =
             &pool.memmap[spec.offset as usize..][..spec.stride as usize * spec.height as usize];
 
@@ -338,10 +331,13 @@ impl RendererState for RendererStateImp {
         }
     }
 
-    fn buffer_resource_destroyed(&mut self, resource: crate::protocol::WlBuffer) {
+    fn buffer_resource_destroyed(&mut self, resource: WlBuffer) {
         let shm_spec = self.shm_buffers.remove(&resource).unwrap();
-        self.shm_pools.get_mut(&shm_spec.pool_id).unwrap().refcnt -= 1;
-        self.consider_dropping_shm_pool(shm_spec.pool_id);
+        let shm_pool = self.shm_pools.get_mut(&shm_spec.pool).unwrap();
+        shm_pool.refcnt -= 1;
+        if !shm_spec.pool.is_alive() && shm_pool.refcnt == 0 {
+            self.shm_pools.remove(&shm_spec.pool);
+        }
     }
 }
 

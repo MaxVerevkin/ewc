@@ -8,6 +8,8 @@ mod gl46_renderer;
 mod pixman_renderer;
 pub mod wayland;
 
+use crate::protocol;
+
 pub trait Backend {
     fn register_fds_with(
         &self,
@@ -21,19 +23,19 @@ pub trait Backend {
 }
 
 pub trait RendererState: Any {
-    fn create_shm_pool(&mut self, fd: OwnedFd, size: usize) -> ShmPoolId;
-    fn resize_shm_pool(&mut self, pool_id: ShmPoolId, new_size: usize);
-    fn shm_pool_resource_destroyed(&mut self, pool_id: ShmPoolId);
-    fn create_shm_buffer(&mut self, spec: ShmBufferSpec, resource: crate::protocol::WlBuffer);
-    fn buffer_commited(&mut self, buffer_resource: crate::protocol::WlBuffer) -> BufferId;
+    fn create_shm_pool(&mut self, fd: OwnedFd, size: usize, resource: protocol::WlShmPool);
+    fn resize_shm_pool(&mut self, pool: protocol::WlShmPool, new_size: usize);
+    fn shm_pool_resource_destroyed(&mut self, pool: protocol::WlShmPool);
+    fn create_shm_buffer(&mut self, spec: ShmBufferSpec, resource: protocol::WlBuffer);
+    fn buffer_commited(&mut self, buffer_resource: protocol::WlBuffer) -> BufferId;
     fn get_buffer_size(&self, buffer_id: BufferId) -> (u32, u32);
     fn buffer_lock(&mut self, buffer_id: BufferId);
     fn buffer_unlock(&mut self, buffer_id: BufferId);
-    fn buffer_resource_destroyed(&mut self, resource: crate::protocol::WlBuffer);
+    fn buffer_resource_destroyed(&mut self, resource: protocol::WlBuffer);
 }
 
 pub struct ShmBufferSpec {
-    pub pool_id: ShmPoolId,
+    pub pool: protocol::WlShmPool,
     pub offset: u32,
     pub width: u32,
     pub height: u32,
@@ -43,8 +45,6 @@ pub struct ShmBufferSpec {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BufferId(pub NonZeroU64);
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ShmPoolId(pub NonZeroU64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct KeyboardId(pub NonZeroU64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
