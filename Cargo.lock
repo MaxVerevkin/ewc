@@ -114,6 +114,7 @@ dependencies = [
 name = "ewc"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "drm",
  "eglgbm",
  "ewc-wayland-scanner",

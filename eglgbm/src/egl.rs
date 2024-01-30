@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::ffi::CStr;
 use std::fmt;
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, RawFd};
 
-use crate::{egl_ffi, gbm, BufferExport, Error, Fourcc, GraphicsApi, Result};
+use crate::{egl_ffi, gbm, BufferExport, Error, FormatTable, Fourcc, GraphicsApi, Result};
 
 /// GBM-based EGL display
 ///
@@ -17,7 +17,7 @@ pub struct EglDisplay {
     minor_version: u32,
 
     extensions: EglExtensions,
-    supported_formats: HashMap<Fourcc, Vec<u64>>,
+    supported_formats: FormatTable,
 
     pub(crate) egl_image_target_renderbuffer_starage_oes:
         egl_ffi::EglImageTargetRenderbufferStorageOesProc,
@@ -26,9 +26,20 @@ pub struct EglDisplay {
 impl EglDisplay {
     /// Create a new EGL display for a given DRM render node.
     pub fn new(drm_render_node: &CStr) -> Result<Self> {
-        EglExtensions::query(egl_ffi::EGL_NO_DISPLAY)?.require("EGL_KHR_platform_gbm")?;
-
         let gbm_device = gbm::Device::open(drm_render_node)?;
+        Self::with_gbm_device(gbm_device)
+    }
+
+    /// Create a new EGL display for a given open DRM FD.
+    ///
+    /// FD must be kept open for the entire lifetime of this display.
+    pub fn with_drm_fd(fd: RawFd) -> Result<Self> {
+        let gbm_device = gbm::Device::with_drm_fd(fd)?;
+        Self::with_gbm_device(gbm_device)
+    }
+
+    fn with_gbm_device(gbm_device: gbm::Device) -> Result<Self> {
+        EglExtensions::query(egl_ffi::EGL_NO_DISPLAY)?.require("EGL_KHR_platform_gbm")?;
 
         let raw = unsafe {
             egl_ffi::eglGetPlatformDisplay(
@@ -136,7 +147,7 @@ impl EglDisplay {
     }
 
     /// Get a set of supported buffer formats, in a form of fourcc -> modifiers mapping
-    pub fn supported_formats(&self) -> &HashMap<Fourcc, Vec<u64>> {
+    pub fn supported_formats(&self) -> &FormatTable {
         &self.supported_formats
     }
 
@@ -155,8 +166,58 @@ impl EglDisplay {
         height: u32,
         fourcc: Fourcc,
         modifiers: &[u64],
+        scan_out: bool,
     ) -> Result<(EglImage, BufferExport)> {
-        EglImage::alloc(self, width, height, fourcc, modifiers)
+        let raw_egl_display = self.as_raw();
+
+        let buf_parts = self
+            .gbm_device()
+            .alloc_buffer(width, height, fourcc, modifiers, scan_out)?
+            .export();
+
+        let mut egl_image_attrs = Vec::with_capacity(7 + 10 * buf_parts.planes.len());
+        egl_image_attrs.push(egl_ffi::EGL_WIDTH as _);
+        egl_image_attrs.push(width as _);
+        egl_image_attrs.push(egl_ffi::EGL_HEIGHT as _);
+        egl_image_attrs.push(height as _);
+        egl_image_attrs.push(egl_ffi::EGL_LINUX_DRM_FOURCC_EXT as _);
+        egl_image_attrs.push(fourcc.0 as _);
+        for (i, plane) in buf_parts.planes.iter().enumerate() {
+            egl_image_attrs.push(egl_ffi::EGL_DMA_BUF_PLANE_FD_EXT[i] as _);
+            egl_image_attrs.push(plane.dmabuf.as_raw_fd() as _);
+            egl_image_attrs.push(egl_ffi::EGL_DMA_BUF_PLANE_OFFSET_EXT[i] as _);
+            egl_image_attrs.push(plane.offset as _);
+            egl_image_attrs.push(egl_ffi::EGL_DMA_BUF_PLANE_PITCH_EXT[i] as _);
+            egl_image_attrs.push(plane.stride as _);
+            egl_image_attrs.push(egl_ffi::EGL_DMA_BUF_PLANE_MODIFIER_LO_EXT[i] as _);
+            egl_image_attrs.push((buf_parts.modifier & 0xFFFF_FFFF) as _);
+            egl_image_attrs.push(egl_ffi::EGL_DMA_BUF_PLANE_MODIFIER_HI_EXT[i] as _);
+            egl_image_attrs.push((buf_parts.modifier >> 32) as _);
+        }
+        egl_image_attrs.push(egl_ffi::EGL_NONE as _);
+
+        let egl_image = unsafe {
+            egl_ffi::eglCreateImage(
+                raw_egl_display,
+                egl_ffi::EGL_NO_CONTEXT,
+                egl_ffi::EGL_LINUX_DMA_BUF_EXT,
+                egl_ffi::EGLClientBuffer(std::ptr::null_mut()),
+                egl_image_attrs.as_ptr(),
+            )
+        };
+        if egl_image == egl_ffi::EGL_NO_IMAGE {
+            return Err(Error::last_egl());
+        }
+
+        Ok((
+            EglImage {
+                egl_display: raw_egl_display,
+                egl_image,
+                egl_image_target_renderbuffer_starage_oes: self
+                    .egl_image_target_renderbuffer_starage_oes,
+            },
+            buf_parts,
+        ))
     }
 }
 
@@ -183,7 +244,7 @@ unsafe fn get_supported_formats(
     gbm_device: &gbm::Device,
     qf: egl_ffi::EglQueryDmabufFormatsExtProc,
     qm: egl_ffi::EglQueryDmabufModifiersExtProc,
-) -> Result<HashMap<Fourcc, Vec<u64>>> {
+) -> Result<FormatTable> {
     let mut retval = HashMap::new();
 
     let mut formats_len = 0;
@@ -434,65 +495,6 @@ pub struct EglImage {
 }
 
 impl EglImage {
-    fn alloc(
-        egl_display: &EglDisplay,
-        width: u32,
-        height: u32,
-        fourcc: Fourcc,
-        modifiers: &[u64],
-    ) -> Result<(Self, BufferExport)> {
-        let raw_egl_display = egl_display.as_raw();
-
-        let buf_parts = egl_display
-            .gbm_device()
-            .alloc_buffer(width, height, fourcc, modifiers)?
-            .export();
-
-        let mut egl_image_attrs = Vec::with_capacity(7 + 10 * buf_parts.planes.len());
-        egl_image_attrs.push(egl_ffi::EGL_WIDTH as _);
-        egl_image_attrs.push(width as _);
-        egl_image_attrs.push(egl_ffi::EGL_HEIGHT as _);
-        egl_image_attrs.push(height as _);
-        egl_image_attrs.push(egl_ffi::EGL_LINUX_DRM_FOURCC_EXT as _);
-        egl_image_attrs.push(fourcc.0 as _);
-        for (i, plane) in buf_parts.planes.iter().enumerate() {
-            egl_image_attrs.push(egl_ffi::EGL_DMA_BUF_PLANE_FD_EXT[i] as _);
-            egl_image_attrs.push(plane.dmabuf.as_raw_fd() as _);
-            egl_image_attrs.push(egl_ffi::EGL_DMA_BUF_PLANE_OFFSET_EXT[i] as _);
-            egl_image_attrs.push(plane.offset as _);
-            egl_image_attrs.push(egl_ffi::EGL_DMA_BUF_PLANE_PITCH_EXT[i] as _);
-            egl_image_attrs.push(plane.stride as _);
-            egl_image_attrs.push(egl_ffi::EGL_DMA_BUF_PLANE_MODIFIER_LO_EXT[i] as _);
-            egl_image_attrs.push((buf_parts.modifier & 0xFFFF_FFFF) as _);
-            egl_image_attrs.push(egl_ffi::EGL_DMA_BUF_PLANE_MODIFIER_HI_EXT[i] as _);
-            egl_image_attrs.push((buf_parts.modifier >> 32) as _);
-        }
-        egl_image_attrs.push(egl_ffi::EGL_NONE as _);
-
-        let egl_image = unsafe {
-            egl_ffi::eglCreateImage(
-                raw_egl_display,
-                egl_ffi::EGL_NO_CONTEXT,
-                egl_ffi::EGL_LINUX_DMA_BUF_EXT,
-                egl_ffi::EGLClientBuffer(std::ptr::null_mut()),
-                egl_image_attrs.as_ptr(),
-            )
-        };
-        if egl_image == egl_ffi::EGL_NO_IMAGE {
-            return Err(Error::last_egl());
-        }
-
-        Ok((
-            Self {
-                egl_display: raw_egl_display,
-                egl_image,
-                egl_image_target_renderbuffer_starage_oes: egl_display
-                    .egl_image_target_renderbuffer_starage_oes,
-            },
-            buf_parts,
-        ))
-    }
-
     /// Associate this buffer with a currently bound GL's renderbuffer object.
     ///
     /// This allows to render directly to this buffer.

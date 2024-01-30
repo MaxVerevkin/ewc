@@ -5,6 +5,7 @@
 
 #![deny(unsafe_op_in_unsafe_fn)]
 
+use std::collections::HashMap;
 use std::fmt;
 
 mod drm;
@@ -16,7 +17,7 @@ pub mod egl_ffi;
 pub use drm::DrmDevice;
 pub use egl::{EglContext, EglContextBuilder, EglDisplay, EglExtensions, EglImage};
 pub use errors::*;
-pub use gbm::{BufferExport, BufferPlane};
+pub use gbm::{Buffer as GbmBuffer, BufferExport, BufferPlane};
 
 #[derive(Debug, Clone, Copy)]
 pub enum GraphicsApi {
@@ -28,6 +29,9 @@ pub enum GraphicsApi {
 /// A DRM fourcc format wrapper with nice `Debug` formatting
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Fourcc(pub u32);
+
+/// A mapping from fourcc drm format to a list of modifiers
+pub type FormatTable = HashMap<Fourcc, Vec<u64>>;
 
 impl fmt::Debug for Fourcc {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

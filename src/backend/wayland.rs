@@ -47,7 +47,7 @@ pub fn new() -> Option<Box<dyn Backend>> {
                 swapchain: None,
                 state: Box::new(gl46_renderer::RendererStateImp::new(
                     render_node_path,
-                    Some(feedback),
+                    feedback,
                 )?),
             }
         }
@@ -164,7 +164,7 @@ impl Backend for BackendImp {
                 let buf = if let Some(buf) = sw.bufs.iter_mut().find(|buf| !buf.in_use) {
                     buf
                 } else if sw.bufs.len() < 2 {
-                    let (fb, export) = state.allocate_framebuffer(sw.width, sw.height);
+                    let (fb, export) = state.allocate_framebuffer(sw.width, sw.height, false);
                     let params = linux_dmabuf.create_params(&mut self.conn);
                     for (i, plane) in export.planes.into_iter().enumerate() {
                         params.add(

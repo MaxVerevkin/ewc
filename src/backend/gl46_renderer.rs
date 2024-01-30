@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::ffi::CStr;
 
-use eglgbm::{egl_ffi::eglGetProcAddress, BufferExport, Fourcc};
+use eglgbm::{egl_ffi::eglGetProcAddress, BufferExport, FormatTable, Fourcc};
 use wayrs_protocols::linux_dmabuf_unstable_v1::zwp_linux_dmabuf_feedback_v1::TrancheFlags;
 use wayrs_utils::dmabuf_feedback::DmabufFeedback;
 
@@ -44,8 +44,21 @@ struct Texture {
 }
 
 impl RendererStateImp {
-    pub fn new(render_node: &CStr, feedback: Option<DmabufFeedback>) -> Option<Self> {
+    pub fn new(render_node: &CStr, feedback: DmabufFeedback) -> Option<Self> {
         let egl = eglgbm::EglDisplay::new(render_node).unwrap();
+        Self::with_egl(egl, Some(feedback), None)
+    }
+
+    pub fn with_drm_fd(fd: RawFd, supported_plane_formats: &FormatTable) -> Option<Self> {
+        let egl = eglgbm::EglDisplay::with_drm_fd(fd).unwrap();
+        Self::with_egl(egl, None, Some(supported_plane_formats))
+    }
+
+    fn with_egl(
+        egl: eglgbm::EglDisplay,
+        feedback: Option<DmabufFeedback>,
+        format_table: Option<&FormatTable>,
+    ) -> Option<Self> {
         eprintln!("EGL v{}.{}", egl.major_version(), egl.minor_version());
 
         let egl_context = eglgbm::EglContextBuilder::new(eglgbm::GraphicsApi::OpenGl)
@@ -95,13 +108,7 @@ impl RendererStateImp {
 
         let (fourcc, mods) = match feedback {
             Some(feedback) => select_format_from_feedback(&egl, feedback),
-            None => (
-                DRM_FORMAT_XRGB8888,
-                egl.supported_formats()
-                    .get(&DRM_FORMAT_XRGB8888)
-                    .expect("xrgb8888 not supported")
-                    .clone(),
-            ),
+            None => select_format_from_format_table(&egl, format_table.unwrap()),
         };
 
         Some(Self {
@@ -123,10 +130,15 @@ impl RendererStateImp {
         })
     }
 
-    pub fn allocate_framebuffer(&mut self, width: u32, height: u32) -> (Framebuffer, BufferExport) {
+    pub fn allocate_framebuffer(
+        &mut self,
+        width: u32,
+        height: u32,
+        scan_out: bool,
+    ) -> (Framebuffer, BufferExport) {
         let (egl_image, export) = self
             .egl
-            .alloc_buffer(width, height, self.fourcc, &self.mods)
+            .alloc_buffer(width, height, self.fourcc, &self.mods, scan_out)
             .unwrap();
         let fb = unsafe { Framebuffer::new(egl_image, &self.gl) };
         (fb, export)
@@ -432,7 +444,7 @@ pub struct Framebuffer {
 }
 
 impl Framebuffer {
-    pub fn destroy(self, gl: &gl46::GlFns) {
+    pub fn destroy(&self, gl: &gl46::GlFns) {
         unsafe { gl.DeleteFramebuffers(1, &self.fbo) };
         unsafe { gl.DeleteRenderbuffers(1, &self.rbo) };
     }
@@ -484,6 +496,28 @@ fn select_format_from_feedback(
                     .entry(Fourcc(fmt.fourcc))
                     .or_default()
                     .push(fmt.modifier);
+            }
+        }
+    }
+
+    (
+        DRM_FORMAT_XRGB8888,
+        formats
+            .remove(&DRM_FORMAT_XRGB8888)
+            .expect("xrgb8888 not supported"),
+    )
+}
+
+fn select_format_from_format_table(
+    egl: &eglgbm::EglDisplay,
+    format_table: &FormatTable,
+) -> (Fourcc, Vec<u64>) {
+    let mut formats = HashMap::<Fourcc, Vec<u64>>::new();
+
+    for (&format, modifiers) in format_table {
+        for &modifier in modifiers {
+            if egl.is_format_supported(format, modifier) {
+                formats.entry(format).or_default().push(modifier);
             }
         }
     }

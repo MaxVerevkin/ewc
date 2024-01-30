@@ -17,6 +17,7 @@ edition.workspace = true
 ewc-wayland-scanner = { path = "ewc-wayland-scanner" }
 libseat = { path = "./libseat" }
 
+bytemuck = "1.14"
 drm = "0.11.1"
 input = "0.9"
 libc = "0.2"
