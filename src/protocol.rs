@@ -1,3 +1,7 @@
-ewc_wayland_scanner::generate!("protocol/wayland.xml");
-ewc_wayland_scanner::generate!("protocol/xdg-shell.xml");
-ewc_wayland_scanner::generate!("protocol/ewc-debug.xml");
+use ewc_wayland_scanner::generate as g;
+
+g!("protocol/wayland.xml");
+
+g!("protocol/ewc-debug.xml");
+
+g!("wayland-protocols/stable/xdg-shell/xdg-shell.xml");

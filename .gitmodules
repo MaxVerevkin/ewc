@@ -1,0 +1,3 @@
+[submodule "wayland-protocols"]
+	path = wayland-protocols
+	url = https://gitlab.freedesktop.org/wayland/wayland-protocols
