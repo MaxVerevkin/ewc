@@ -320,6 +320,10 @@ impl Server {
                         .key_get_one_sym(xkb::Keycode::new(key + 8));
                     if self.state.seat.keyboard.get_mods().logo && keysym == xkb::Keysym::Escape {
                         return Err(io::Error::other("quit"));
+                    } else if self.state.seat.keyboard.get_mods().logo
+                        && keysym == xkb::Keysym::Return
+                    {
+                        std::process::Command::new("foot").spawn().unwrap();
                     } else if keysym >= xkb::Keysym::XF86_Switch_VT_1
                         && keysym <= xkb::Keysym::XF86_Switch_VT_12
                     {
