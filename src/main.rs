@@ -22,7 +22,7 @@ mod protocol;
 mod seat;
 mod wayland_core;
 
-use crate::backend::{Backend, BackendEvent, Frame};
+use crate::backend::{Backend, BackendEvent, Color, Frame};
 use crate::client::{Client, ClientId};
 use crate::event_loop::EventLoop;
 use crate::focus_stack::FocusStack;
@@ -244,6 +244,48 @@ impl Server {
                                 0.8
                             };
                             if let Some(geom) = xdg_surface.get_window_geometry() {
+                                let border_color =
+                                    if toplevel_i == self.state.focus_stack.inner().len() - 1 {
+                                        Color::from_rgba(1.0, 0.0, 0.0, 1.0)
+                                    } else {
+                                        Color::from_rgba(0.2, 0.2, 0.2, 1.0) * alpha
+                                    };
+                                frame.render_rect(
+                                    border_color,
+                                    pixman::Rectangle32 {
+                                        x: toplevel.x.get() - 2,
+                                        y: toplevel.y.get() - 2,
+                                        width: 2,
+                                        height: geom.height.get() + 4,
+                                    },
+                                );
+                                frame.render_rect(
+                                    border_color,
+                                    pixman::Rectangle32 {
+                                        x: toplevel.x.get() + geom.width.get() as i32,
+                                        y: toplevel.y.get() - 2,
+                                        width: 2,
+                                        height: geom.height.get() + 4,
+                                    },
+                                );
+                                frame.render_rect(
+                                    border_color,
+                                    pixman::Rectangle32 {
+                                        x: toplevel.x.get(),
+                                        y: toplevel.y.get() - 2,
+                                        width: geom.width.get(),
+                                        height: 2,
+                                    },
+                                );
+                                frame.render_rect(
+                                    border_color,
+                                    pixman::Rectangle32 {
+                                        x: toplevel.x.get(),
+                                        y: toplevel.y.get() + geom.height.get() as i32,
+                                        width: geom.width.get(),
+                                        height: 2,
+                                    },
+                                );
                                 render_surface(
                                     frame,
                                     &xdg_surface.wl_surface.upgrade().unwrap(),
@@ -267,10 +309,7 @@ impl Server {
                             }
                             None => {
                                 frame.render_rect(
-                                    0.5,
-                                    0.5,
-                                    0.5,
-                                    1.0,
+                                    Color::from_rgba(0.5, 0.5, 0.5, 1.0),
                                     pixman::Rectangle32 {
                                         x: self.state.seat.pointer.x.round() as i32,
                                         y: self.state.seat.pointer.y.round() as i32,

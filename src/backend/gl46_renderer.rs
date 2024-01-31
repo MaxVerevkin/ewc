@@ -413,14 +413,14 @@ impl Frame for FrameImp<'_> {
         self.state.verts.push(vert);
     }
 
-    fn render_rect(&mut self, r: f32, g: f32, b: f32, a: f32, rect: pixman::Rectangle32) {
+    fn render_rect(&mut self, color: Color, rect: pixman::Rectangle32) {
         let mut vert = Vert {
             x: rect.x as f32,
             y: rect.y as f32,
-            r,
-            g,
-            b,
-            a,
+            r: color.r,
+            g: color.g,
+            b: color.b,
+            a: color.a,
         };
         self.state.verts.push(vert);
         vert.x = (rect.x + rect.width as i32) as f32;

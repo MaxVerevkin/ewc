@@ -64,7 +64,33 @@ pub trait Frame {
         x: i32,
         y: i32,
     );
-    fn render_rect(&mut self, r: f32, g: f32, b: f32, a: f32, rect: pixman::Rectangle32);
+    fn render_rect(&mut self, color: Color, rect: pixman::Rectangle32);
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct Color {
+    r: f32,
+    g: f32,
+    b: f32,
+    a: f32,
+}
+
+impl Color {
+    pub fn from_rgba(r: f32, g: f32, b: f32, a: f32) -> Self {
+        Self { r, g, b, a }
+    }
+}
+
+impl std::ops::Mul<f32> for Color {
+    type Output = Self;
+    fn mul(mut self, rhs: f32) -> Self::Output {
+        self.r *= rhs;
+        self.g *= rhs;
+        self.b *= rhs;
+        self.a *= rhs;
+        self
+    }
 }
 
 pub enum BackendEvent {

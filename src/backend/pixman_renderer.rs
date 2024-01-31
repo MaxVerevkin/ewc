@@ -252,13 +252,14 @@ impl Frame for FrameImp<'_> {
         );
     }
 
-    fn render_rect(&mut self, r: f32, g: f32, b: f32, a: f32, rect: pixman::Rectangle32) {
-        let op = if a == 1.0 {
+    fn render_rect(&mut self, color: Color, rect: pixman::Rectangle32) {
+        let op = if color.a == 1.0 {
             pixman::Operation::Src
         } else {
             pixman::Operation::Over
         };
-        let src = pixman::Solid::new(pixman::Color::from_f32(r, g, b, a)).unwrap();
+        let src = pixman::Solid::new(pixman::Color::from_f32(color.r, color.g, color.b, color.a))
+            .unwrap();
         self.image.composite32(
             op,
             &src,
