@@ -185,7 +185,6 @@ impl Server {
                 toplevel_start_height: sh,
             } => {
                 let toplevel = toplevel.upgrade().unwrap();
-                let client = self.clients.get_mut(&toplevel.wl.client_id()).unwrap();
                 let mut dw = 0;
                 let mut dh = 0;
                 if *edge as u32 & ResizeEdge::Top as u32 != 0 {
@@ -202,7 +201,6 @@ impl Server {
                 }
                 if dw != 0 || dh != 0 {
                     toplevel.request_size(
-                        client,
                         *edge,
                         NonZeroU32::new(sw.checked_add_signed(dw).unwrap_or(1))
                             .unwrap_or(NonZeroU32::MIN),
@@ -469,6 +467,12 @@ fn main() {
                 }
             }
             event_loop::Event::MayGoIdle => {
+                for (i, toplevel) in server.state.focus_stack.inner().iter().enumerate() {
+                    let toplevel = toplevel.upgrade().unwrap();
+                    toplevel.set_activated(i == server.state.focus_stack.inner().len() - 1);
+                    toplevel.apply_pending_configure();
+                }
+
                 for client_id in server.to_flush_set.clone().0.borrow_mut().drain() {
                     if let Some(client) = server.clients.get(&client_id) {
                         if let Err(e) = client.conn.flush() {

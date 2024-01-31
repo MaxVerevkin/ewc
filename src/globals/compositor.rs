@@ -1,7 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::io;
-use std::num::Wrapping;
 use std::rc::{Rc, Weak};
 
 use super::xdg_shell;
@@ -14,7 +13,6 @@ use crate::{Client, State};
 
 #[derive(Default)]
 pub struct Compositor {
-    pub next_configure_serial: Wrapping<u32>,
     pub regions: HashMap<WlRegion, pixman::Region32>,
     pub surfaces: HashMap<WlSurface, Rc<Surface>>,
     pub subsurfaces: HashMap<WlSubsurface, Rc<SubsurfaceRole>>,
@@ -372,7 +370,7 @@ fn wl_surface_cb(ctx: RequestCtx<WlSurface>) -> io::Result<()> {
                     .apply_to_and_clear(&mut surface.cur.borrow_mut(), ctx.state);
                 surface.apply_cache(ctx.state);
                 if let Some(xdg) = surface.get_xdg_surface() {
-                    xdg_shell::surface_commit(ctx.client, ctx.state, &xdg)?;
+                    xdg_shell::surface_commit(ctx.state, &xdg)?;
                 }
             }
         }

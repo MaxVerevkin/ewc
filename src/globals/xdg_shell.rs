@@ -10,7 +10,7 @@ use crate::client::RequestCtx;
 use crate::protocol::xdg_toplevel::ResizeEdge;
 use crate::protocol::*;
 use crate::wayland_core::Proxy;
-use crate::{Client, State};
+use crate::State;
 
 pub struct XdgSurfaceRole {
     pub wl: XdgSurface,
@@ -109,17 +109,27 @@ pub struct XdgToplevelRole {
     pub xdg_surface: Weak<XdgSurfaceRole>,
     pub wl_surface: Weak<Surface>,
     pub map_state: Cell<MapState>,
-    pub pending_configure: Cell<Option<u32>>,
 
     pub x: Cell<i32>,
     pub y: Cell<i32>,
     resizing: Cell<Option<(ResizeEdge, i32, i32, u32)>>,
+
+    pub cur_configure: Cell<ToplevelConfigure>,
+    pub pending_configure: Cell<Option<ToplevelConfigure>>,
 
     pub cur: RefCell<XdgToplevelState>,
     pub pending: RefCell<XdgToplevelState>,
     pub dirty_app_id: Cell<bool>,
     pub dirty_title: Cell<bool>,
     pub dirty_min_size: Cell<bool>,
+}
+
+#[derive(Clone, Copy)]
+pub struct ToplevelConfigure {
+    serial: u32,
+    width: u32,
+    heinght: u32,
+    activated: bool,
 }
 
 impl XdgToplevelRole {
@@ -131,16 +141,47 @@ impl XdgToplevelRole {
             .unfocus_surface(&self.wl_surface.upgrade().unwrap().wl);
     }
 
-    pub fn request_size(
-        &self,
-        client: &mut Client,
-        edge: ResizeEdge,
-        width: NonZeroU32,
-        height: NonZeroU32,
-    ) {
+    pub fn apply_pending_configure(&self) {
+        if let Some(configure) = self.pending_configure.take() {
+            self.cur_configure.set(configure);
+            let mut states = Vec::new();
+            if configure.activated {
+                states.extend_from_slice(&(xdg_toplevel::State::Activated as u32).to_ne_bytes());
+            }
+            self.wl
+                .configure(configure.width as i32, configure.heinght as i32, states);
+            self.xdg_surface
+                .upgrade()
+                .unwrap()
+                .wl
+                .configure(configure.serial);
+        }
+    }
+
+    pub fn set_activated(&self, value: bool) {
+        if self.cur_configure.get().activated != value {
+            let mut configure = self.pending_configure.get().unwrap_or_else(|| {
+                let mut conf = self.cur_configure.get();
+                conf.serial += 1;
+                conf
+            });
+            configure.activated = value;
+            self.pending_configure.set(Some(configure));
+        }
+    }
+
+    pub fn request_size(&self, edge: ResizeEdge, width: NonZeroU32, height: NonZeroU32) {
         if self.map_state.get() == MapState::Mapped {
-            let serial = client.compositor.next_configure_serial.0;
-            client.compositor.next_configure_serial += 1;
+            let mut configure = self.pending_configure.take().unwrap_or_else(|| {
+                let mut c = self.cur_configure.get();
+                c.serial += 1;
+                c
+            });
+
+            configure.width = width.get();
+            configure.heinght = height.get();
+            let serial = configure.serial;
+            self.pending_configure.set(Some(configure));
 
             match self.resizing.get() {
                 None => {
@@ -159,11 +200,6 @@ impl XdgToplevelRole {
                     self.resizing.set(Some((edge, onx, ony, serial)));
                 }
             }
-
-            self.wl
-                .configure(width.get() as i32, height.get() as i32, Vec::new());
-            self.xdg_surface.upgrade().unwrap().wl.configure(serial);
-            self.pending_configure.set(Some(serial));
         }
     }
 }
@@ -253,11 +289,18 @@ fn xdg_surface_cb(ctx: RequestCtx<XdgSurface>) -> io::Result<()> {
                 xdg_surface: Rc::downgrade(xdg_surface),
                 wl_surface: xdg_surface.wl_surface.clone(),
                 map_state: Cell::new(MapState::Unmapped),
-                pending_configure: Cell::new(None),
 
                 x: Cell::new(0),
                 y: Cell::new(0),
                 resizing: Cell::new(None),
+
+                cur_configure: Cell::new(ToplevelConfigure {
+                    serial: 0,
+                    width: 0,
+                    heinght: 0,
+                    activated: false,
+                }),
+                pending_configure: Cell::new(None),
 
                 cur: RefCell::new(XdgToplevelState::default()),
                 pending: RefCell::new(XdgToplevelState::default()),
@@ -367,11 +410,7 @@ fn xdg_toplevel_cb(ctx: RequestCtx<XdgToplevel>) -> io::Result<()> {
     Ok(())
 }
 
-pub fn surface_commit(
-    client: &mut Client,
-    state: &mut State,
-    xdg_surface: &XdgSurfaceRole,
-) -> io::Result<()> {
+pub fn surface_commit(state: &mut State, xdg_surface: &XdgSurfaceRole) -> io::Result<()> {
     let surface = xdg_surface.wl_surface.upgrade().unwrap();
     if let Some(geom) = xdg_surface.pending.window_geometry.take() {
         let mut geom = pixman::Box32::from(geom);
@@ -414,18 +453,25 @@ pub fn surface_commit(
                     if surface.cur.borrow().buffer.is_some() {
                         return Err(io::Error::other("unmapped surface commited a buffer"));
                     }
-                    let serial = client.compositor.next_configure_serial.0;
-                    client.compositor.next_configure_serial += 1;
+                    let serial = toplevel.cur_configure.get().serial + 1;
                     toplevel.wl.configure(400, 200, Vec::new());
                     xdg_surface.wl.configure(serial);
                     toplevel.map_state.set(MapState::WaitingFirstBuffer);
-                    toplevel.pending_configure.set(Some(serial));
+                    toplevel.pending_configure.set(None);
+                    toplevel.cur_configure.set(ToplevelConfigure {
+                        serial,
+                        width: 400,
+                        heinght: 200,
+                        activated: false,
+                    });
                 }
                 MapState::WaitingFirstBuffer => {
                     if surface.cur.borrow().buffer.is_none() {
                         return Err(io::Error::other("did not submit initial buffer"));
                     }
-                    if toplevel.pending_configure.get() != xdg_surface.last_acked_configure.get() {
+                    if Some(toplevel.cur_configure.get().serial)
+                        != xdg_surface.last_acked_configure.get()
+                    {
                         return Err(io::Error::other("did not ack the initial config"));
                     }
                     let (x, y) = state
