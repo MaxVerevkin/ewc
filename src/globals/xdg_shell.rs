@@ -284,6 +284,9 @@ fn xdg_surface_cb(ctx: RequestCtx<XdgSurface>) -> io::Result<()> {
                 return Err(io::Error::other("xdg surface already has a role"));
             }
             toplevel.set_callback(xdg_toplevel_cb);
+            if toplevel.version() >= 5 {
+                toplevel.wm_capabilities(Vec::new());
+            }
             let toplevel = Rc::new(XdgToplevelRole {
                 wl: toplevel,
                 xdg_surface: Rc::downgrade(xdg_surface),
@@ -362,7 +365,7 @@ fn xdg_toplevel_cb(ctx: RequestCtx<XdgToplevel>) -> io::Result<()> {
             toplevel.dirty_app_id.set(true);
             toplevel.pending.borrow_mut().app_id = Some(app_id);
         }
-        Request::ShowWindowMenu(_) => todo!(),
+        Request::ShowWindowMenu(_) => (),
         Request::Move(_args) => {
             let toplevel_i = ctx
                 .state
@@ -401,11 +404,11 @@ fn xdg_toplevel_cb(ctx: RequestCtx<XdgToplevel>) -> io::Result<()> {
             toplevel.dirty_min_size.set(true);
             toplevel.pending.borrow_mut().min_size = Some((args.width as u32, args.height as u32));
         }
-        Request::SetMaximized => todo!(),
-        Request::UnsetMaximized => todo!(),
-        Request::SetFullscreen(_) => todo!(),
-        Request::UnsetFullscreen => todo!(),
-        Request::SetMinimized => todo!(),
+        Request::SetMaximized => (),
+        Request::UnsetMaximized => (),
+        Request::SetFullscreen(_) => (), // Note: update the wm_capabilities event when implemented
+        Request::UnsetFullscreen => (),
+        Request::SetMinimized => (),
     }
     Ok(())
 }

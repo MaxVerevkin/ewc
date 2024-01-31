@@ -118,7 +118,6 @@ impl Server {
         Compositor::register_globals(&mut globals);
         Seat::register_globals(&mut globals);
         globals.add_global::<WlShm>(1);
-        globals.add_global::<XdgWmBase>(3);
         globals.add_global::<WlOutput>(2);
         globals.add_global::<EwcDebugV1>(1);
         Self {

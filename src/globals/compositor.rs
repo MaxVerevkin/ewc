@@ -24,6 +24,7 @@ impl Compositor {
     pub fn register_globals(globals: &mut GlobalsManager) {
         globals.add_global::<WlCompositor>(6);
         globals.add_global::<WlSubcompositor>(1);
+        globals.add_global::<XdgWmBase>(5);
     }
 }
 
