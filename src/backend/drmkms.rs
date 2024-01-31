@@ -31,6 +31,8 @@ pub fn new() -> Option<Box<dyn Backend>> {
     card.set_client_capability(drm::ClientCapability::Atomic, true)
         .expect("Unable to request Atomic capability");
 
+    card.reset_crtcs().expect("could not reset CRTCs");
+
     let res = card
         .resource_handles()
         .expect("Could not load normal resource ids.");
@@ -322,6 +324,47 @@ impl Card {
         let (fd, id) = seat.open_device(path)?;
         Ok(Self { fd, id: Some(id) })
     }
+
+    fn reset_crtcs(&self) -> io::Result<()> {
+        let resources = self.resource_handles()?;
+        let mut atomic_req = AtomicModeReq::new();
+        for &con in resources.connectors() {
+            let props = self.get_properties(con)?.as_hashmap(self)?;
+            atomic_req.add_property(
+                con,
+                props["CRTC_ID"].handle(),
+                drm::control::property::Value::CRTC(None),
+            );
+        }
+        for &plane in &self.plane_handles()? {
+            let props = self.get_properties(plane)?.as_hashmap(self)?;
+            atomic_req.add_property(
+                plane,
+                props["FB_ID"].handle(),
+                drm::control::property::Value::Framebuffer(None),
+            );
+            atomic_req.add_property(
+                plane,
+                props["CRTC_ID"].handle(),
+                drm::control::property::Value::CRTC(None),
+            );
+        }
+        for &crtc in resources.crtcs() {
+            let props = self.get_properties(crtc)?.as_hashmap(self)?;
+            atomic_req.add_property(
+                crtc,
+                props["MODE_ID"].handle(),
+                drm::control::property::Value::Blob(0),
+            );
+            atomic_req.add_property(
+                crtc,
+                props["ACTIVE"].handle(),
+                drm::control::property::Value::Boolean(false),
+            );
+        }
+        self.atomic_commit(AtomicCommitFlags::ALLOW_MODESET, atomic_req.clone())?;
+        Ok(())
+    }
 }
 
 impl drm::Device for Card {}
@@ -384,6 +427,7 @@ impl Backend for BackendImp {
                         libseat::Event::Enable => {
                             eprintln!("seat enabled");
                             if self.suspended {
+                                self.card.reset_crtcs().expect("could not reset CRTCs");
                                 self.atomic_req.add_property(
                                     self.plane,
                                     self.plane_props["FB_ID"].handle(),
