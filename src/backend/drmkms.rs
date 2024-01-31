@@ -49,6 +49,7 @@ pub fn new() -> Option<Box<dyn Backend>> {
 
     let con = coninfo
         .iter()
+        .rev()
         .find(|i| i.state() == drm::control::connector::State::Connected)
         .expect("No connected connectors");
     let mode = *con.modes().first().expect("No modes found on connector");
