@@ -25,6 +25,7 @@ memmap2 = "0.8"
 pixman = "0.1"
 shmemfdrs = "0.1.4"
 signal-hook = "0.3"
+xcursor = "0.3"
 xkbcommon = "0.7.0"
 
 gbm-sys = "0.3"

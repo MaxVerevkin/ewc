@@ -217,6 +217,30 @@ impl RendererState for RendererStateImp {
         &[wl_shm::Format::Argb8888, wl_shm::Format::Xrgb8888]
     }
 
+    fn create_argb8_texture(&mut self, width: u32, height: u32, bytes: &[u8]) -> BufferId {
+        let gl_name = unsafe {
+            create_texture(
+                &self.gl,
+                width,
+                height,
+                width * 4,
+                wl_shm::Format::Argb8888,
+                bytes,
+            )
+        };
+        let new_id = BufferId(next_id(&mut self.next_id));
+        self.textures.insert(
+            new_id,
+            Texture {
+                gl_name,
+                width,
+                height,
+                locks: 1,
+            },
+        );
+        new_id
+    }
+
     fn create_shm_pool(&mut self, fd: OwnedFd, size: usize, resource: WlShmPool) {
         self.shm_pools.insert(
             resource,
@@ -260,58 +284,26 @@ impl RendererState for RendererStateImp {
         let bytes =
             &pool.memmap[spec.offset as usize..][..spec.stride as usize * spec.height as usize];
 
-        let mut tex = 0;
-        unsafe {
-            self.gl.CreateTextures(gl46::GL_TEXTURE_2D, 1, &mut tex);
-            self.gl
-                .TextureParameteri(tex, gl46::GL_TEXTURE_MIN_FILTER, gl46::GL_NEAREST.0 as i32);
-            self.gl
-                .TextureParameteri(tex, gl46::GL_TEXTURE_MAG_FILTER, gl46::GL_NEAREST.0 as i32);
-            self.gl.TextureParameteri(
-                tex,
-                gl46::GL_TEXTURE_WRAP_S,
-                gl46::GL_CLAMP_TO_EDGE.0 as i32,
-            );
-            self.gl.TextureParameteri(
-                tex,
-                gl46::GL_TEXTURE_WRAP_T,
-                gl46::GL_CLAMP_TO_EDGE.0 as i32,
-            );
-            self.gl.TextureStorage2D(
-                tex,
-                1,
-                match spec.wl_format {
-                    wl_shm::Format::Argb8888 => gl46::GL_RGBA8,
-                    wl_shm::Format::Xrgb8888 => gl46::GL_RGB8,
-                    _ => panic!("unsupported wl format"),
-                },
-                spec.width as i32,
-                spec.height as i32,
-            );
-            self.gl.TextureSubImage2D(
-                tex,
-                0,
-                0,
-                0,
-                spec.width as i32,
-                spec.height as i32,
-                gl46::GL_BGRA,
-                gl46::GL_UNSIGNED_BYTE,
-                bytes.as_ptr().cast(),
-            );
-        }
-
+        let gl_name = unsafe {
+            create_texture(
+                &self.gl,
+                spec.width,
+                spec.height,
+                spec.stride,
+                wl_shm::Format::Argb8888,
+                bytes,
+            )
+        };
         let new_id = BufferId(next_id(&mut self.next_id));
         self.textures.insert(
             new_id,
             Texture {
-                gl_name: tex,
+                gl_name,
                 width: spec.width,
                 height: spec.height,
                 locks: 1,
             },
         );
-
         new_id
     }
 
@@ -645,4 +637,53 @@ pub unsafe fn setup_gl_debug_cb(gl: &gl46::GlFns) {
     }
 
     unsafe { gl.DebugMessageCallback(Some(gl_debug_cb), std::ptr::null()) };
+}
+
+unsafe fn create_texture(
+    gl: &gl46::GlFns,
+    width: u32,
+    height: u32,
+    stride: u32,
+    format: wl_shm::Format,
+    bytes: &[u8],
+) -> u32 {
+    let mut tex = 0;
+    gl.CreateTextures(gl46::GL_TEXTURE_2D, 1, &mut tex);
+    gl.TextureParameteri(tex, gl46::GL_TEXTURE_MIN_FILTER, gl46::GL_NEAREST.0 as i32);
+    gl.TextureParameteri(tex, gl46::GL_TEXTURE_MAG_FILTER, gl46::GL_NEAREST.0 as i32);
+    gl.TextureParameteri(
+        tex,
+        gl46::GL_TEXTURE_WRAP_S,
+        gl46::GL_CLAMP_TO_EDGE.0 as i32,
+    );
+    gl.TextureParameteri(
+        tex,
+        gl46::GL_TEXTURE_WRAP_T,
+        gl46::GL_CLAMP_TO_EDGE.0 as i32,
+    );
+    gl.TextureStorage2D(
+        tex,
+        1,
+        match format {
+            wl_shm::Format::Argb8888 => gl46::GL_RGBA8,
+            wl_shm::Format::Xrgb8888 => gl46::GL_RGB8,
+            _ => panic!("unsupported wl format"),
+        },
+        width as i32,
+        height as i32,
+    );
+    gl.PixelStorei(gl46::GL_UNPACK_ROW_LENGTH, stride as i32 / 4);
+    gl.TextureSubImage2D(
+        tex,
+        0,
+        0,
+        0,
+        width as i32,
+        height as i32,
+        gl46::GL_BGRA,
+        gl46::GL_UNSIGNED_BYTE,
+        bytes.as_ptr().cast(),
+    );
+    gl.PixelStorei(gl46::GL_UNPACK_ROW_LENGTH, 0);
+    tex
 }

@@ -15,6 +15,7 @@ use xkbcommon::xkb;
 
 mod backend;
 mod client;
+mod cursor;
 mod event_loop;
 mod focus_stack;
 mod globals;
@@ -24,6 +25,7 @@ mod wayland_core;
 
 use crate::backend::{Backend, BackendEvent, Color, Frame};
 use crate::client::{Client, ClientId};
+use crate::cursor::Cursor;
 use crate::event_loop::EventLoop;
 use crate::focus_stack::FocusStack;
 use crate::globals::compositor::{Compositor, Surface};
@@ -58,7 +60,7 @@ pub struct State {
     pub globals: GlobalsManager,
     pub backend: Box<dyn Backend>,
     pub seat: Seat,
-    pub cursor: Option<(Rc<Surface>, i32, i32)>,
+    pub cursor: Cursor,
     pub focus_stack: FocusStack,
     pub debugger: Debugger,
 }
@@ -74,10 +76,12 @@ impl ToFlushSet {
 
 fn choose_backend() -> Box<dyn Backend> {
     if let Some(b) = backend::wayland::new() {
+        eprintln!("using wayland backend");
         return b;
     }
 
     if let Some(b) = backend::drmkms::new() {
+        eprintln!("using drmkms backend");
         return b;
     }
 
@@ -97,7 +101,7 @@ impl Server {
     }
 
     pub fn new(socket_path: PathBuf) -> Self {
-        let backend = choose_backend();
+        let mut backend = choose_backend();
         let socket = UnixListener::bind(&socket_path).unwrap();
         socket.set_nonblocking(true).unwrap();
         let mut event_loop = EventLoop::new().unwrap();
@@ -109,6 +113,7 @@ impl Server {
                 event_loop.add_fd(fd, event_loop::Event::Backend(data))
             })
             .unwrap();
+        let cursor = Cursor::new(backend.as_mut());
         let mut globals = GlobalsManager::default();
         Compositor::register_globals(&mut globals);
         Seat::register_globals(&mut globals);
@@ -126,8 +131,8 @@ impl Server {
             state: State {
                 globals,
                 backend,
+                cursor,
                 seat: Seat::new(),
-                cursor: None,
                 focus_stack: FocusStack::default(),
                 debugger: Debugger::default(),
             },
@@ -217,7 +222,7 @@ impl Server {
                         .forward_pointer(Some((surf.wl.clone(), sx, sy)));
                 } else {
                     self.state.seat.pointer.forward_pointer(None);
-                    self.state.cursor = None;
+                    self.state.cursor.set_normal();
                 }
             }
         }
@@ -295,29 +300,14 @@ impl Server {
                                 );
                             }
                         }
-                        match &self.state.cursor {
-                            Some((surf, hx, hy)) => {
-                                if let Some((buf, _, _)) = surf.cur.borrow().buffer {
-                                    frame.render_buffer(
-                                        buf,
-                                        surf.cur.borrow().opaque_region.as_ref(),
-                                        1.0,
-                                        self.state.seat.pointer.x.round() as i32 - hx,
-                                        self.state.seat.pointer.y.round() as i32 - hy,
-                                    );
-                                }
-                            }
-                            None => {
-                                frame.render_rect(
-                                    Color::from_rgba(0.5, 0.5, 0.5, 1.0),
-                                    pixman::Rectangle32 {
-                                        x: self.state.seat.pointer.x.round() as i32,
-                                        y: self.state.seat.pointer.y.round() as i32,
-                                        width: 10,
-                                        height: 10,
-                                    },
-                                );
-                            }
+                        if let Some((buf_id, hx, hy)) = self.state.cursor.get_buffer() {
+                            frame.render_buffer(
+                                buf_id,
+                                None,
+                                1.0,
+                                self.state.seat.pointer.x.round() as i32 - hx,
+                                self.state.seat.pointer.y.round() as i32 - hy,
+                            );
                         }
                     });
                     self.state.debugger.frame(t.elapsed());

@@ -24,6 +24,7 @@ pub trait Backend {
 
 pub trait RendererState: Any {
     fn supported_shm_formats(&self) -> &[protocol::wl_shm::Format];
+    fn create_argb8_texture(&mut self, width: u32, height: u32, bytes: &[u8]) -> BufferId;
     fn create_shm_pool(&mut self, fd: OwnedFd, size: usize, resource: protocol::WlShmPool);
     fn resize_shm_pool(&mut self, pool: protocol::WlShmPool, new_size: usize);
     fn shm_pool_resource_destroyed(&mut self, pool: protocol::WlShmPool);

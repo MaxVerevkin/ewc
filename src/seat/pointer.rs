@@ -197,7 +197,7 @@ fn wl_pointer_cb(ctx: RequestCtx<WlPointer>) -> io::Result<()> {
     use wl_pointer::Request;
     match ctx.request {
         Request::SetCursor(args) => match args.surface {
-            None => ctx.state.cursor = None,
+            None => ctx.state.cursor.hide(),
             Some(surf) => {
                 let surface = ctx.client.compositor.surfaces.get(&surf).unwrap();
                 match &mut *surface.role.borrow_mut() {
@@ -205,7 +205,9 @@ fn wl_pointer_cb(ctx: RequestCtx<WlPointer>) -> io::Result<()> {
                     SurfaceRole::Cursor => (),
                     _ => return Err(io::Error::other("surface already has a role")),
                 }
-                ctx.state.cursor = Some((surface.clone(), args.hotspot_x, args.hotspot_y));
+                ctx.state
+                    .cursor
+                    .set_surface(surface.clone(), args.hotspot_x, args.hotspot_y);
             }
         },
         Request::Release => {
