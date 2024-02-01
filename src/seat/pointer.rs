@@ -85,6 +85,9 @@ impl Pointer {
             if old_surface.is_alive() {
                 for ptr in old_surface.conn().seat.pointers.borrow().iter() {
                     ptr.leave(1, old_surface);
+                    if ptr.version() >= 5 {
+                        ptr.frame();
+                    }
                 }
             }
         }
@@ -185,6 +188,9 @@ impl Pointer {
     fn enter(&self, wl_pointer: &WlPointer) {
         if let PtrState::Focused { surface, x, y } = &self.state {
             wl_pointer.enter(1, surface, Fixed::from(*x), Fixed::from(*y));
+            if wl_pointer.version() >= 5 {
+                wl_pointer.frame();
+            }
         }
     }
 
