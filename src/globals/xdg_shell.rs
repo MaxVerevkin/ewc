@@ -367,31 +367,13 @@ fn xdg_toplevel_cb(ctx: RequestCtx<XdgToplevel>) -> io::Result<()> {
         }
         Request::ShowWindowMenu(_) => (),
         Request::Move(_args) => {
-            let toplevel_i = ctx
-                .state
-                .focus_stack
-                .inner()
-                .iter()
-                .position(|x| x.upgrade().unwrap().wl == ctx.proxy)
-                .unwrap();
+            ctx.state.seat.pointer.start_move(toplevel.clone());
+        }
+        Request::Resize(args) => {
             ctx.state
                 .seat
                 .pointer
-                .start_move(&mut ctx.state.focus_stack, Some(toplevel_i));
-        }
-        Request::Resize(args) => {
-            let toplevel_i = ctx
-                .state
-                .focus_stack
-                .inner()
-                .iter()
-                .position(|x| x.upgrade().unwrap().wl == ctx.proxy)
-                .unwrap();
-            ctx.state.seat.pointer.start_resize(
-                &mut ctx.state.focus_stack,
-                args.edges,
-                Some(toplevel_i),
-            );
+                .start_resize(args.edges, toplevel.clone());
         }
         Request::SetMaxSize(args) => {
             dbg!(args);

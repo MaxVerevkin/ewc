@@ -57,8 +57,8 @@ impl Seat {
         }
 
         if let Some(surf) = self.pointer.get_focused_surface() {
-            if surf.client_id() == client_id {
-                self.pointer.unfocus_surface(&surf.clone());
+            if surf.wl.client_id() == client_id {
+                self.pointer.unfocus_surface(&surf.wl);
             }
         }
 
@@ -136,7 +136,7 @@ impl IsGlobal for WlSeat {
             use wl_seat::Request;
             match ctx.request {
                 Request::GetPointer(wl_pointer) => {
-                    ctx.state.seat.pointer.init_pointer(&wl_pointer);
+                    ctx.state.seat.pointer.init_new_resource(&wl_pointer);
                     ctx.client.conn.seat.pointers.borrow_mut().push(wl_pointer);
                 }
                 Request::GetKeyboard(wl_keyboard) => {

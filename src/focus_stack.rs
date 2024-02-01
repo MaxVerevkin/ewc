@@ -3,6 +3,7 @@ use std::rc::{Rc, Weak};
 use crate::client::ClientId;
 use crate::globals::compositor::Surface;
 use crate::globals::xdg_shell::XdgToplevelRole;
+use crate::seat::Seat;
 use crate::wayland_core::Proxy;
 
 #[derive(Default)]
@@ -72,9 +73,10 @@ impl FocusStack {
         self.inner.last().map(|x| x.upgrade().unwrap())
     }
 
-    pub fn focus_i(&mut self, i: usize) {
-        let tl = self.inner.remove(i);
-        self.inner.push(tl);
+    pub fn focus_i(&mut self, i: usize, seat: &mut Seat) {
+        let tl = self.inner.remove(i).upgrade().unwrap();
+        seat.kbd_focus_surface(Some(tl.wl_surface.upgrade().unwrap().wl.clone()));
+        self.inner.push(Rc::downgrade(&tl));
     }
 
     pub fn get_i(&mut self, i: usize) -> Option<Rc<XdgToplevelRole>> {

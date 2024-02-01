@@ -29,15 +29,12 @@ impl Compositor {
 
     pub fn release_buffers(self, backend: &mut dyn Backend) {
         for surface in self.surfaces.values() {
-            eprintln!("checking {:?}", surface.wl);
             if let Some(subsurf) = surface.get_subsurface() {
                 if let Some((buf_id, _, _)) = subsurf.cached_state.borrow().buffer {
-                    eprintln!("releasing {buf_id:?}");
                     backend.renderer_state().buffer_unlock(buf_id);
                 }
             }
             if let Some((buf_id, _, _)) = surface.cur.borrow().buffer {
-                eprintln!("releasing {buf_id:?}");
                 backend.renderer_state().buffer_unlock(buf_id);
             }
         }
@@ -158,6 +155,36 @@ impl Surface {
             }
         }
         Some(bbox)
+    }
+
+    pub fn get_pos(self: &Rc<Self>) -> Option<(i32, i32)> {
+        let mut s = self.clone();
+        let mut sub_x = 0;
+        let mut sub_y = 0;
+        while let Some(sub) = s.get_subsurface() {
+            let parent = sub.parent.upgrade().unwrap();
+            let (px, py) = parent
+                .cur
+                .borrow()
+                .subsurfaces
+                .iter()
+                .find(|node| node.surface.wl == s.wl)?
+                .position;
+            sub_x += px;
+            sub_y += py;
+            s = parent;
+        }
+        if let Some(xdg) = s.get_xdg_surface() {
+            if let Some(toplevel) = xdg.get_toplevel() {
+                if let Some(geom) = xdg.get_window_geometry() {
+                    return Some((
+                        toplevel.x.get() + sub_x - geom.x,
+                        toplevel.y.get() + sub_y - geom.y,
+                    ));
+                }
+            }
+        }
+        None
     }
 
     pub fn effective_is_sync(&self) -> bool {

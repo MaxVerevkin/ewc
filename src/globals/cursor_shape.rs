@@ -14,7 +14,7 @@ impl IsGlobal for WpCursorShapeManagerV1 {
         self.set_callback(|ctx| {
             use wp_cursor_shape_manager_v1::Request;
             match ctx.request {
-                Request::Destroy => todo!(),
+                Request::Destroy => (),
                 Request::GetPointer(args) => args.cursor_shape_device.set_callback(shape_device_cb),
                 Request::GetTabletToolV2(_) => todo!(),
             }

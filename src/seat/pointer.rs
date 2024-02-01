@@ -2,8 +2,7 @@ use std::io;
 use std::rc::{Rc, Weak};
 
 use crate::client::RequestCtx;
-use crate::focus_stack::FocusStack;
-use crate::globals::compositor::SurfaceRole;
+use crate::globals::compositor::{Surface, SurfaceRole};
 use crate::globals::xdg_shell::XdgToplevelRole;
 use crate::protocol::*;
 use crate::wayland_core::{Fixed, Proxy};
@@ -22,15 +21,19 @@ pub struct Pointer {
     pub state: PtrState,
     pub x: f32,
     pub y: f32,
+    pressed_buttons: Vec<u32>,
+}
+
+pub struct SurfacePointer {
+    surface: Rc<Surface>,
+    pressed_buttons: Vec<u32>,
+    x: Fixed,
+    y: Fixed,
 }
 
 pub enum PtrState {
     None,
-    Focused {
-        surface: WlSurface,
-        x: f32,
-        y: f32,
-    },
+    Entered(SurfacePointer),
     Moving {
         toplevel: Weak<XdgToplevelRole>,
         ptr_start_x: f32,
@@ -54,98 +57,118 @@ impl Pointer {
             state: PtrState::None,
             x: 0.0,
             y: 0.0,
+            pressed_buttons: Vec::new(),
         }
     }
 
-    pub fn init_pointer(&self, wl_pointer: &WlPointer) {
+    pub fn init_new_resource(&self, wl_pointer: &WlPointer) {
         wl_pointer.set_callback(wl_pointer_cb);
-        if let Some(focused) = self.get_focused_surface() {
-            if focused.is_alive() && focused.client_id() == wl_pointer.client_id() {
-                self.enter(wl_pointer);
+        if let PtrState::Entered(sp) = &self.state {
+            if sp.surface.wl.client_id() == wl_pointer.client_id() {
+                wl_pointer.enter(1, &sp.surface.wl, sp.x, sp.y);
             }
         }
     }
 
-    pub fn forward_pointer(&mut self, surface: Option<(WlSurface, f32, f32)>) {
-        if let Some((surface, x, y)) = &surface {
-            if let Some(fsurf) = self.get_focused_surface() {
-                if surface == fsurf {
-                    for ptr in surface.conn().seat.pointers.borrow().iter() {
-                        ptr.motion(0, Fixed::from(*x), Fixed::from(*y));
-                        if ptr.version() >= 5 {
-                            ptr.frame()
-                        }
-                    }
-                    return;
+    pub fn leave_any_surface(&mut self) {
+        if let PtrState::Entered(sp) = &self.state {
+            for ptr in sp.surface.wl.conn().seat.pointers.borrow().iter() {
+                ptr.leave(1, &sp.surface.wl);
+                if ptr.version() >= 5 {
+                    ptr.frame();
                 }
             }
         }
-
-        if let Some(old_surface) = self.get_focused_surface() {
-            if old_surface.is_alive() {
-                for ptr in old_surface.conn().seat.pointers.borrow().iter() {
-                    ptr.leave(1, old_surface);
-                    if ptr.version() >= 5 {
-                        ptr.frame();
-                    }
-                }
-            }
-        }
-
-        self.state = surface
-            .map(|(surface, x, y)| PtrState::Focused { surface, x, y })
-            .unwrap_or(PtrState::None);
-        if let Some(new_surface) = self.get_focused_surface() {
-            for ptr in new_surface.conn().seat.pointers.borrow().iter() {
-                self.enter(ptr);
-            }
-        }
+        self.state = PtrState::None;
     }
 
-    pub fn forward_btn(&mut self, btn: u32, pressed: bool) {
-        let state = if pressed {
-            wl_pointer::ButtonState::Pressed
-        } else {
-            wl_pointer::ButtonState::Released
-        };
-        if let Some(surface) = self.get_focused_surface() {
-            if surface.is_alive() {
-                for ptr in surface.conn().seat.pointers.borrow().iter() {
-                    ptr.button(1, 0, btn, state);
+    pub fn forward_pointer(&mut self, surface: Rc<Surface>, x: f32, y: f32) {
+        let x = Fixed::from(x);
+        let y = Fixed::from(y);
+
+        if let PtrState::Entered(sp) = &mut self.state {
+            if surface.wl == sp.surface.wl {
+                for ptr in surface.wl.conn().seat.pointers.borrow().iter() {
+                    ptr.motion(0, x, y);
                     if ptr.version() >= 5 {
                         ptr.frame()
                     }
                 }
-            } else {
-                self.state = PtrState::None;
+                return;
+            }
+
+            for ptr in sp.surface.wl.conn().seat.pointers.borrow().iter() {
+                ptr.leave(1, &sp.surface.wl);
+                if ptr.version() >= 5 {
+                    ptr.frame();
+                }
+            }
+        }
+
+        self.state = PtrState::Entered(SurfacePointer {
+            surface: surface.clone(),
+            pressed_buttons: Vec::new(),
+            x,
+            y,
+        });
+
+        for ptr in surface.wl.conn().seat.pointers.borrow().iter() {
+            ptr.enter(1, &surface.wl, x, y);
+            if ptr.version() >= 5 {
+                ptr.frame();
             }
         }
     }
 
-    pub fn axis_vertical(&mut self, value: f32) {
-        if let Some(surface) = self.get_focused_surface() {
-            if surface.is_alive() {
-                for ptr in surface.conn().seat.pointers.borrow().iter() {
-                    if value != 0.0 {
-                        ptr.axis(0, wl_pointer::Axis::VerticalScroll, Fixed::from(value));
+    pub fn update_button(&mut self, btn: u32, pressed: bool, forward: bool) {
+        if pressed {
+            self.pressed_buttons.push(btn);
+        } else {
+            self.pressed_buttons.retain(|x| *x != btn);
+        }
+
+        if forward {
+            if let PtrState::Entered(sp) = &mut self.state {
+                if pressed && !sp.pressed_buttons.contains(&btn) {
+                    sp.pressed_buttons.push(btn);
+                    for ptr in sp.surface.wl.conn().seat.pointers.borrow().iter() {
+                        ptr.button(1, 0, btn, wl_pointer::ButtonState::Pressed);
+                        if ptr.version() >= 5 {
+                            ptr.frame()
+                        }
+                    }
+                } else if !pressed && sp.pressed_buttons.contains(&btn) {
+                    sp.pressed_buttons.retain(|x| *x != btn);
+                    for ptr in sp.surface.wl.conn().seat.pointers.borrow().iter() {
+                        ptr.button(1, 0, btn, wl_pointer::ButtonState::Released);
                         if ptr.version() >= 5 {
                             ptr.frame()
                         }
                     }
                 }
-            } else {
-                self.state = PtrState::None;
             }
         }
     }
 
-    pub fn start_move(&mut self, focus_stack: &mut FocusStack, toplevel_i: Option<usize>) {
-        let Some(toplevel_i) = toplevel_i.or_else(|| focus_stack.toplevel_at(self.x, self.y))
-        else {
-            return;
-        };
-        self.forward_pointer(None);
-        let toplevel = focus_stack.get_i(toplevel_i).unwrap();
+    pub fn number_of_pressed_buttons(&self) -> usize {
+        self.pressed_buttons.len()
+    }
+
+    pub fn axis_vertical(&mut self, value: f32) {
+        if let Some(surface) = self.get_focused_surface() {
+            for ptr in surface.wl.conn().seat.pointers.borrow().iter() {
+                if value != 0.0 {
+                    ptr.axis(0, wl_pointer::Axis::VerticalScroll, Fixed::from(value));
+                    if ptr.version() >= 5 {
+                        ptr.frame()
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn start_move(&mut self, toplevel: Rc<XdgToplevelRole>) {
+        self.leave_any_surface();
         self.state = PtrState::Moving {
             toplevel: Rc::downgrade(&toplevel),
             ptr_start_x: self.x,
@@ -153,21 +176,10 @@ impl Pointer {
             toplevel_start_x: toplevel.x.get(),
             toplevel_start_y: toplevel.y.get(),
         };
-        focus_stack.focus_i(toplevel_i);
     }
 
-    pub fn start_resize(
-        &mut self,
-        focus_stack: &mut FocusStack,
-        edge: xdg_toplevel::ResizeEdge,
-        toplevel_i: Option<usize>,
-    ) {
-        let Some(toplevel_i) = toplevel_i.or_else(|| focus_stack.toplevel_at(self.x, self.y))
-        else {
-            return;
-        };
-        self.forward_pointer(None);
-        let toplevel = focus_stack.get_i(toplevel_i).unwrap();
+    pub fn start_resize(&mut self, edge: xdg_toplevel::ResizeEdge, toplevel: Rc<XdgToplevelRole>) {
+        self.leave_any_surface();
         let start_geom = toplevel
             .xdg_surface
             .upgrade()
@@ -182,28 +194,21 @@ impl Pointer {
             toplevel_start_width: start_geom.width.get(),
             toplevel_start_height: start_geom.height.get(),
         };
-        focus_stack.focus_i(toplevel_i);
     }
 
-    fn enter(&self, wl_pointer: &WlPointer) {
-        if let PtrState::Focused { surface, x, y } = &self.state {
-            wl_pointer.enter(1, surface, Fixed::from(*x), Fixed::from(*y));
-            if wl_pointer.version() >= 5 {
-                wl_pointer.frame();
-            }
-        }
-    }
-
-    pub fn get_focused_surface(&self) -> Option<&WlSurface> {
+    pub fn get_focused_surface(&self) -> Option<Rc<Surface>> {
         match &self.state {
-            PtrState::Focused { surface, .. } => Some(surface),
+            PtrState::Entered(sp) => Some(sp.surface.clone()),
             _ => None,
         }
     }
 
     pub fn unfocus_surface(&mut self, wl_surface: &WlSurface) {
-        if self.get_focused_surface() == Some(wl_surface) {
-            self.forward_pointer(None);
+        if self
+            .get_focused_surface()
+            .is_some_and(|x| x.wl == *wl_surface)
+        {
+            self.leave_any_surface();
         }
     }
 }

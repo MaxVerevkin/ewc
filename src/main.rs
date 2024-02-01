@@ -224,16 +224,24 @@ impl Server {
                 }
             }
             _ => {
-                if let Some((_i, surf, sx, sy)) = self.state.focus_stack.surface_at(
+                if self.state.seat.pointer.number_of_pressed_buttons() > 0
+                    && self.state.seat.pointer.get_focused_surface().is_some()
+                {
+                    let surf = self.state.seat.pointer.get_focused_surface().unwrap();
+                    let (x, y) = surf.get_pos().unwrap();
+                    let sx = self.state.seat.pointer.x.round() - x as f32;
+                    let sy = self.state.seat.pointer.y.round() - y as f32;
+                    self.state.seat.pointer.forward_pointer(surf, sx, sy);
+                } else if let Some((_i, surf, sx, sy)) = self.state.focus_stack.surface_at(
                     self.state.seat.pointer.x.round() as i32,
                     self.state.seat.pointer.y.round() as i32,
                 ) {
                     self.state
                         .seat
                         .pointer
-                        .forward_pointer(Some((surf.wl.clone(), sx, sy)));
+                        .forward_pointer(surf.clone(), sx, sy);
                 } else {
-                    self.state.seat.pointer.forward_pointer(None);
+                    self.state.seat.pointer.leave_any_surface();
                     self.state.cursor.set_shape(Shape::Default);
                 }
             }
@@ -374,27 +382,47 @@ impl Server {
                     self.pointer_moved();
                 }
                 BackendEvent::PointerBtnPress(_id, btn) => {
-                    if self.state.seat.keyboard.get_mods().alt && btn == BTN_LEFT {
-                        self.state
-                            .seat
-                            .pointer
-                            .start_move(&mut self.state.focus_stack, None);
-                    } else if self.state.seat.keyboard.get_mods().alt && btn == BTN_RIGHT {
-                        self.state.seat.pointer.start_resize(
-                            &mut self.state.focus_stack,
-                            xdg_toplevel::ResizeEdge::BottomRight,
-                            None,
-                        );
-                    } else {
-                        self.state.seat.pointer.forward_btn(btn, true);
+                    let mut handeled = false;
+
+                    if self.state.seat.pointer.number_of_pressed_buttons() == 0 {
+                        if let Some(toplevel_i) = self
+                            .state
+                            .focus_stack
+                            .toplevel_at(self.state.seat.pointer.x, self.state.seat.pointer.y)
+                        {
+                            let toplevel = self.state.focus_stack.get_i(toplevel_i).unwrap();
+                            self.state
+                                .focus_stack
+                                .focus_i(toplevel_i, &mut self.state.seat);
+
+                            if self.state.seat.keyboard.get_mods().alt {
+                                if btn == BTN_LEFT {
+                                    handeled = true;
+                                    self.state.seat.pointer.start_move(toplevel);
+                                } else if btn == BTN_RIGHT {
+                                    handeled = true;
+                                    self.state.seat.pointer.start_resize(
+                                        xdg_toplevel::ResizeEdge::BottomRight,
+                                        toplevel,
+                                    )
+                                }
+                            }
+                        }
                     }
+
+                    self.state.seat.pointer.update_button(btn, true, !handeled);
                 }
                 BackendEvent::PointerBtnRelease(_id, btn) => match &self.state.seat.pointer.state {
-                    PtrState::Moving { .. } | PtrState::Resizing { .. } => {
+                    PtrState::Moving { .. } => {
                         self.state.seat.pointer.state = PtrState::None;
+                        self.state.seat.pointer.update_button(btn, false, false);
+                    }
+                    PtrState::Resizing { .. } => {
+                        self.state.seat.pointer.state = PtrState::None;
+                        self.state.seat.pointer.update_button(btn, false, false);
                     }
                     _ => {
-                        self.state.seat.pointer.forward_btn(btn, false);
+                        self.state.seat.pointer.update_button(btn, false, true);
                     }
                 },
                 BackendEvent::PointerAxisVertial(_id, value) => {
