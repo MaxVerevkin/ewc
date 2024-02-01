@@ -28,6 +28,7 @@ Wayland compositor from scratch in Rust.
 - [ ] `single-pixel-buffer-v1.xml`
 - [ ] `fractional-scale-v1.xml`
 - [ ] `wlr-layer-shell-unstable-v1.xml`
+- [x] `cursor-shape-v1.xml`
 
 
 ## Environment variables

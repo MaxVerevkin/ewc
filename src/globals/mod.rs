@@ -10,6 +10,7 @@ use crate::wayland_core::{Interface, Object, ObjectId, Proxy};
 use crate::{Client, State};
 
 pub mod compositor;
+pub mod cursor_shape;
 pub mod ewc_debug;
 pub mod linux_dmabuf;
 pub mod shm;

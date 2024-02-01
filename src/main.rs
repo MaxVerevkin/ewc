@@ -32,6 +32,7 @@ use crate::globals::compositor::{Compositor, Surface};
 use crate::globals::ewc_debug::Debugger;
 use crate::globals::linux_dmabuf::LinuxDmabuf;
 use crate::globals::GlobalsManager;
+use crate::protocol::wp_cursor_shape_device_v1::Shape;
 use crate::protocol::xdg_toplevel::ResizeEdge;
 use crate::protocol::*;
 use crate::seat::pointer::{PtrState, BTN_LEFT, BTN_RIGHT};
@@ -123,6 +124,7 @@ impl Server {
         let mut globals = GlobalsManager::default();
         Compositor::register_globals(&mut globals);
         Seat::register_globals(&mut globals);
+        globals::cursor_shape::register_global(&mut globals);
         globals.add_global::<WlShm>(1);
         globals.add_global::<WlOutput>(2);
         globals.add_global::<EwcDebugV1>(1);
@@ -232,7 +234,7 @@ impl Server {
                         .forward_pointer(Some((surf.wl.clone(), sx, sy)));
                 } else {
                     self.state.seat.pointer.forward_pointer(None);
-                    self.state.cursor.set_normal();
+                    self.state.cursor.set_shape(Shape::Default);
                 }
             }
         }

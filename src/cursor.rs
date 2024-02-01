@@ -1,13 +1,22 @@
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::backend::{Backend, BufferId};
 use crate::client::ClientId;
 use crate::globals::compositor::Surface;
+use crate::protocol::wp_cursor_shape_device_v1::Shape;
 use crate::Proxy;
 
 pub struct Cursor {
     kind: Kind,
-    default_image: (BufferId, i32, i32),
+    shapes: HashMap<Shape, Texture>,
+}
+
+#[derive(Clone, Copy)]
+struct Texture {
+    buffer_id: BufferId,
+    hx: i32,
+    hy: i32,
 }
 
 enum Kind {
@@ -17,11 +26,7 @@ enum Kind {
         hx: i32,
         hy: i32,
     },
-    Texture {
-        id: BufferId,
-        hx: i32,
-        hy: i32,
-    },
+    Texture(Texture),
 }
 
 impl Cursor {
@@ -32,33 +37,19 @@ impl Cursor {
                 .unwrap_or("default"),
         );
 
-        let path = theme.load_icon("default").expect("no cursor");
-        let content = std::fs::read(path).expect("failed to read cursor");
-        let mut images = xcursor::parser::parse_xcursor(&content).expect("parse image");
-        images.sort_by(|a, b| a.size.cmp(&b.size));
-        let (Ok(i) | Err(i)) = images.binary_search_by_key(&24, |x| x.size);
-        let image = &images[i];
-        let default_image = (
-            backend.renderer_state().create_argb8_texture(
-                image.width,
-                image.height,
-                &image.pixels_rgba,
-            ),
-            image.xhot as i32,
-            image.yhot as i32,
-        );
+        let mut shapes = HashMap::new();
+
+        for &(shape, str) in TO_STR_MAPPING {
+            if let Some(tex) = get_texture(&theme, backend, str) {
+                shapes.insert(shape, tex);
+            } else {
+                eprintln!("cursor theme does not contain '{str}");
+            }
+        }
 
         Self {
             kind: Kind::Hidden,
-            default_image,
-        }
-    }
-
-    pub fn set_normal(&mut self) {
-        self.kind = Kind::Texture {
-            id: self.default_image.0,
-            hx: self.default_image.1,
-            hy: self.default_image.2,
+            shapes,
         }
     }
 
@@ -70,6 +61,14 @@ impl Cursor {
         self.kind = Kind::Surface { surface, hx, hy }
     }
 
+    pub fn set_shape(&mut self, shape: Shape) {
+        if let Some(tex) = self.shapes.get(&shape) {
+            self.kind = Kind::Texture(*tex);
+        } else if let Some(default) = self.shapes.get(&Shape::Default) {
+            self.kind = Kind::Texture(*default);
+        }
+    }
+
     pub fn get_buffer(&self) -> Option<(BufferId, i32, i32)> {
         match &self.kind {
             Kind::Hidden => None,
@@ -78,7 +77,7 @@ impl Cursor {
                 .borrow()
                 .buffer
                 .map(|(buf, _, _)| (buf, *hx, *hy)),
-            Kind::Texture { id, hx, hy } => Some((*id, *hx, *hy)),
+            Kind::Texture(tex) => Some((tex.buffer_id, tex.hx, tex.hy)),
         }
     }
 
@@ -91,3 +90,62 @@ impl Cursor {
         }
     }
 }
+
+fn get_texture(
+    theme: &xcursor::CursorTheme,
+    backend: &mut dyn Backend,
+    name: &str,
+) -> Option<Texture> {
+    let path = theme.load_icon(name)?;
+    let content = std::fs::read(path).ok()?;
+    let mut images = xcursor::parser::parse_xcursor(&content)?;
+    images.sort_by(|a, b| a.size.cmp(&b.size));
+    let (Ok(i) | Err(i)) = images.binary_search_by_key(&24, |x| x.size);
+    let image = images.get(i).or_else(|| images.last())?;
+    Some(Texture {
+        buffer_id: backend.renderer_state().create_argb8_texture(
+            image.width,
+            image.height,
+            &image.pixels_rgba,
+        ),
+        hx: image.xhot as i32,
+        hy: image.yhot as i32,
+    })
+}
+
+const TO_STR_MAPPING: &[(Shape, &str)] = &[
+    (Shape::Default, "default"),
+    (Shape::ContextMenu, "context-menu"),
+    (Shape::Help, "help"),
+    (Shape::Pointer, "pointer"),
+    (Shape::Progress, "progress"),
+    (Shape::Wait, "wait"),
+    (Shape::Cell, "cell"),
+    (Shape::Crosshair, "crosshair"),
+    (Shape::Text, "text"),
+    (Shape::VerticalText, "vertical-text"),
+    (Shape::Alias, "alias"),
+    (Shape::Copy, "copy"),
+    (Shape::Move, "move"),
+    (Shape::NoDrop, "no-drop"),
+    (Shape::NotAllowed, "not-allowed"),
+    (Shape::Grab, "grab"),
+    (Shape::Grabbing, "grabbing"),
+    (Shape::EResize, "e-resize"),
+    (Shape::NResize, "n-resize"),
+    (Shape::NeResize, "ne-resize"),
+    (Shape::NwResize, "nw-resize"),
+    (Shape::SResize, "s-resize"),
+    (Shape::SeResize, "se-resize"),
+    (Shape::SwResize, "sw-resize"),
+    (Shape::WResize, "w-resize"),
+    (Shape::EwResize, "ew-resize"),
+    (Shape::NsResize, "ns-resize"),
+    (Shape::NeswResize, "nesw-resize"),
+    (Shape::NwseResize, "nwse-resize"),
+    (Shape::ColResize, "col-resize"),
+    (Shape::RowResize, "row-resize"),
+    (Shape::AllScroll, "all-scroll"),
+    (Shape::ZoomIn, "zoom-in"),
+    (Shape::ZoomOut, "zoom-out"),
+];
