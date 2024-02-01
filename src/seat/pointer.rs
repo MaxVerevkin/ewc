@@ -72,6 +72,9 @@ impl Pointer {
                 if surface == fsurf {
                     for ptr in surface.conn().seat.pointers.borrow().iter() {
                         ptr.motion(0, Fixed::from(*x), Fixed::from(*y));
+                        if ptr.version() >= 5 {
+                            ptr.frame()
+                        }
                     }
                     return;
                 }
@@ -106,6 +109,9 @@ impl Pointer {
             if surface.is_alive() {
                 for ptr in surface.conn().seat.pointers.borrow().iter() {
                     ptr.button(1, 0, btn, state);
+                    if ptr.version() >= 5 {
+                        ptr.frame()
+                    }
                 }
             } else {
                 self.state = PtrState::None;
@@ -119,6 +125,9 @@ impl Pointer {
                 for ptr in surface.conn().seat.pointers.borrow().iter() {
                     if value != 0.0 {
                         ptr.axis(0, wl_pointer::Axis::VerticalScroll, Fixed::from(value));
+                        if ptr.version() >= 5 {
+                            ptr.frame()
+                        }
                     }
                 }
             } else {
