@@ -420,10 +420,13 @@ fn wl_surface_cb(ctx: RequestCtx<WlSurface>) -> io::Result<()> {
         }
         Request::SetBufferTransform(_) => todo!(),
         Request::SetBufferScale(scale) => {
-            assert_eq!(scale, 1);
+            assert_eq!(scale, 1, "unimplemented");
         }
         Request::DamageBuffer(_) => (),
-        Request::Offset(_) => todo!(),
+        Request::Offset(args) => {
+            assert_eq!(args.x, 0, "unimplemnted");
+            assert_eq!(args.y, 0, "unimplemnted");
+        }
     }
     Ok(())
 }

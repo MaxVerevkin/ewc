@@ -356,7 +356,9 @@ fn xdg_toplevel_cb(ctx: RequestCtx<XdgToplevel>) -> io::Result<()> {
                 .borrow_mut() = SpecificRole::None;
             ctx.client.compositor.xdg_toplevels.remove(&ctx.proxy);
         }
-        Request::SetParent(_) => todo!(),
+        Request::SetParent(parent) => {
+            assert_eq!(parent, None, "unimplemented");
+        }
         Request::SetTitle(title) => {
             toplevel.dirty_title.set(true);
             toplevel.pending.borrow_mut().title = Some(title);
@@ -376,8 +378,8 @@ fn xdg_toplevel_cb(ctx: RequestCtx<XdgToplevel>) -> io::Result<()> {
                 .start_resize(args.edges, toplevel.clone());
         }
         Request::SetMaxSize(args) => {
-            dbg!(args);
-            eprintln!("TODO: set max size");
+            assert_eq!(args.width, 0, "unmiplemented");
+            assert_eq!(args.height, 0, "unmiplemented");
         }
         Request::SetMinSize(args) => {
             if args.width < 0 || args.height < 0 {
