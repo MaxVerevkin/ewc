@@ -421,7 +421,7 @@ fn gen_event_fn(opcode: u16, event: &Message) -> TokenStream {
             | ArgType::Object {
                 iface: Some(_),
                 allow_null: false,
-            } => quote! { crate::wayland_core::ArgValue::#arg_ty(#arg_name.id()) },
+            } => quote! { crate::wayland_core::ArgValue::#arg_ty(Proxy::id(#arg_name)) },
             ArgType::Object {
                 iface: Some(_),
                 allow_null: true,
