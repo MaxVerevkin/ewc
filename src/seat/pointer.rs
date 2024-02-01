@@ -60,7 +60,7 @@ impl Pointer {
     pub fn init_pointer(&self, wl_pointer: &WlPointer) {
         wl_pointer.set_callback(wl_pointer_cb);
         if let Some(focused) = self.get_focused_surface() {
-            if focused.client_id() == wl_pointer.client_id() {
+            if focused.is_alive() && focused.client_id() == wl_pointer.client_id() {
                 self.enter(wl_pointer);
             }
         }
@@ -179,7 +179,7 @@ impl Pointer {
         }
     }
 
-    fn get_focused_surface(&self) -> Option<&WlSurface> {
+    pub fn get_focused_surface(&self) -> Option<&WlSurface> {
         match &self.state {
             PtrState::Focused { surface, .. } => Some(surface),
             _ => None,

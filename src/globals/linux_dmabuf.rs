@@ -40,6 +40,15 @@ impl LinuxDmabuf {
     pub fn register_global(globals: &mut GlobalsManager) {
         globals.add_global::<ZwpLinuxDmabufV1>(3);
     }
+
+    pub fn destroy(self, state: &mut State) {
+        for buffer in self.buffers {
+            state
+                .backend
+                .renderer_state()
+                .buffer_resource_destroyed(buffer);
+        }
+    }
 }
 
 impl IsGlobal for ZwpLinuxDmabufV1 {

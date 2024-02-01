@@ -13,8 +13,6 @@ use crate::Proxy;
 
 const DRM_FORMAT_XRGB8888: Fourcc = Fourcc(u32::from_le_bytes(*b"XR24"));
 
-static mut TEXCNT: u32 = 0;
-
 pub struct RendererStateImp {
     shm_pools: HashMap<WlShmPool, ShmPool>,
     shm_buffers: HashMap<WlBuffer, ShmBufferSpec>,
@@ -224,11 +222,7 @@ impl RendererStateImp {
             }
         }
         let buffer = self.textures.remove(&buffer_id).unwrap();
-        unsafe {
-            TEXCNT -= 1;
-            self.gl.DeleteTextures(1, &buffer.gl_name);
-            dbg!(TEXCNT);
-        };
+        unsafe { self.gl.DeleteTextures(1, &buffer.gl_name) };
     }
 }
 
@@ -300,7 +294,6 @@ impl RendererState for RendererStateImp {
         let mut gl_name = 0;
         unsafe {
             self.gl.GenTextures(1, &mut gl_name);
-            TEXCNT += 1;
             self.gl.BindTexture(gl46::GL_TEXTURE_2D, gl_name);
             self.gl.TexParameteri(
                 gl46::GL_TEXTURE_2D,
@@ -341,9 +334,9 @@ impl RendererState for RendererStateImp {
     }
 
     fn buffer_commited(&mut self, buffer_resource: WlBuffer) -> BufferId {
-        if let Some(dma) = self.dma_buffers.get(&buffer_resource) {
-            self.textures.get_mut(dma).unwrap().locks += 1;
-            return *dma;
+        if let Some(&dma) = self.dma_buffers.get(&buffer_resource) {
+            self.buffer_lock(dma);
+            return dma;
         }
 
         let spec = self.shm_buffers.get(&buffer_resource).unwrap();
@@ -709,7 +702,6 @@ unsafe fn create_texture(
 ) -> u32 {
     let mut tex = 0;
     gl.CreateTextures(gl46::GL_TEXTURE_2D, 1, &mut tex);
-    TEXCNT += 1;
     gl.TextureParameteri(tex, gl46::GL_TEXTURE_MIN_FILTER, gl46::GL_NEAREST.0 as i32);
     gl.TextureParameteri(tex, gl46::GL_TEXTURE_MAG_FILTER, gl46::GL_NEAREST.0 as i32);
     gl.TextureParameteri(

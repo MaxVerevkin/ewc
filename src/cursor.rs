@@ -1,7 +1,9 @@
 use std::rc::Rc;
 
 use crate::backend::{Backend, BufferId};
+use crate::client::ClientId;
 use crate::globals::compositor::Surface;
+use crate::Proxy;
 
 pub struct Cursor {
     kind: Kind,
@@ -77,6 +79,15 @@ impl Cursor {
                 .buffer
                 .map(|(buf, _, _)| (buf, *hx, *hy)),
             Kind::Texture { id, hx, hy } => Some((*id, *hx, *hy)),
+        }
+    }
+
+    pub fn remove_client(&mut self, client_id: ClientId) {
+        match &self.kind {
+            Kind::Surface { surface, .. } if surface.wl.client_id() == client_id => {
+                self.hide();
+            }
+            _ => (),
         }
     }
 }

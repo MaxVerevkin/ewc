@@ -106,10 +106,8 @@ impl Keyboard {
         }
 
         if let Some(old_surf) = &self.focused_surface {
-            if old_surf.is_alive() {
-                for kbd in old_surf.conn().seat.keyboards.borrow().iter() {
-                    kbd.leave(1, old_surf);
-                }
+            for kbd in old_surf.conn().seat.keyboards.borrow().iter() {
+                kbd.leave(1, old_surf);
             }
         }
 

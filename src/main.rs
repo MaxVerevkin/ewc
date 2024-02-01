@@ -92,12 +92,17 @@ fn choose_backend() -> Box<dyn Backend> {
 impl Server {
     pub fn destroy_client(&mut self, client_id: ClientId) {
         eprintln!("destroying client");
+        self.state.cursor.remove_client(client_id);
         self.state.globals.remove_client(client_id);
         self.state.seat.remove_client(client_id);
         self.state.focus_stack.remove_client(client_id);
         self.state.debugger.remove_client(client_id);
         let client = self.clients.remove(&client_id).unwrap();
+        client
+            .compositor
+            .release_buffers(self.state.backend.as_mut());
         client.shm.destroy(&mut self.state);
+        client.linux_dambuf.destroy(&mut self.state);
         self.event_loop.remove(client.conn.as_raw_fd()).unwrap();
     }
 

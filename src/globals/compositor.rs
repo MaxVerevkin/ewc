@@ -4,7 +4,7 @@ use std::io;
 use std::rc::{Rc, Weak};
 
 use super::xdg_shell;
-use crate::backend::BufferId;
+use crate::backend::{Backend, BufferId};
 use crate::client::RequestCtx;
 use crate::globals::{GlobalsManager, IsGlobal};
 use crate::protocol::*;
@@ -25,6 +25,22 @@ impl Compositor {
         globals.add_global::<WlCompositor>(6);
         globals.add_global::<WlSubcompositor>(1);
         globals.add_global::<XdgWmBase>(5);
+    }
+
+    pub fn release_buffers(self, backend: &mut dyn Backend) {
+        for surface in self.surfaces.values() {
+            eprintln!("checking {:?}", surface.wl);
+            if let Some(subsurf) = surface.get_subsurface() {
+                if let Some((buf_id, _, _)) = subsurf.cached_state.borrow().buffer {
+                    eprintln!("releasing {buf_id:?}");
+                    backend.renderer_state().buffer_unlock(buf_id);
+                }
+            }
+            if let Some((buf_id, _, _)) = surface.cur.borrow().buffer {
+                eprintln!("releasing {buf_id:?}");
+                backend.renderer_state().buffer_unlock(buf_id);
+            }
+        }
     }
 }
 
