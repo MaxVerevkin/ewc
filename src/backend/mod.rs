@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::collections::HashMap;
 use std::io;
 use std::num::NonZeroU64;
 use std::os::fd::{OwnedFd, RawFd};
@@ -8,6 +9,7 @@ mod gl46_renderer;
 mod pixman_renderer;
 pub mod wayland;
 
+use crate::globals::shm::ShmPool;
 use crate::protocol;
 
 pub trait Backend {
@@ -24,10 +26,8 @@ pub trait Backend {
 
 pub trait RendererState: Any {
     fn supported_shm_formats(&self) -> &[protocol::wl_shm::Format];
+    fn get_shm_state(&mut self) -> &mut HashMap<protocol::WlShmPool, ShmPool>;
     fn create_argb8_texture(&mut self, width: u32, height: u32, bytes: &[u8]) -> BufferId;
-    fn create_shm_pool(&mut self, fd: OwnedFd, size: usize, resource: protocol::WlShmPool);
-    fn resize_shm_pool(&mut self, pool: protocol::WlShmPool, new_size: usize);
-    fn shm_pool_resource_destroyed(&mut self, pool: protocol::WlShmPool);
     fn create_shm_buffer(&mut self, spec: ShmBufferSpec, resource: protocol::WlBuffer);
     fn buffer_commited(&mut self, buffer_resource: protocol::WlBuffer) -> BufferId;
     fn get_buffer_size(&self, buffer_id: BufferId) -> (u32, u32);

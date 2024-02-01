@@ -1,4 +1,6 @@
+use std::collections::hash_map;
 use std::io;
+use std::os::fd::OwnedFd;
 
 use super::IsGlobal;
 use crate::backend::ShmBufferSpec;
@@ -10,6 +12,22 @@ use crate::{Client, State};
 pub struct Shm {
     pub shm_pools: Vec<WlShmPool>,
     pub wl_buffers: Vec<WlBuffer>,
+}
+
+pub struct ShmPool {
+    pub memmap: memmap2::Mmap,
+    pub size: usize,
+    pub refcnt: usize,
+}
+
+impl ShmPool {
+    fn new(fd: OwnedFd, size: usize) -> io::Result<Self> {
+        Ok(Self {
+            memmap: unsafe { memmap2::MmapOptions::new().len(size).map(&fd)? },
+            size,
+            refcnt: 0,
+        })
+    }
 }
 
 impl Shm {
@@ -28,10 +46,7 @@ impl Shm {
                 .buffer_resource_destroyed(buffer);
         }
         for pool in self.shm_pools {
-            state
-                .backend
-                .renderer_state()
-                .shm_pool_resource_destroyed(pool);
+            state.backend.renderer_state().get_shm_state().remove(&pool);
         }
     }
 }
@@ -53,11 +68,11 @@ fn wl_shm_cb(ctx: RequestCtx<WlShm>) -> io::Result<()> {
             if args.size <= 0 {
                 return Err(io::Error::other("poll must be greater than zero"));
             }
-            ctx.state.backend.renderer_state().create_shm_pool(
-                args.fd,
-                args.size as usize,
-                args.id.clone(),
-            );
+            ctx.state
+                .backend
+                .renderer_state()
+                .get_shm_state()
+                .insert(args.id.clone(), ShmPool::new(args.fd, args.size as usize)?);
             ctx.client.shm.shm_pools.push(args.id);
         }
     }
@@ -93,17 +108,38 @@ fn wl_shm_pool_cb(ctx: RequestCtx<WlShmPool>) -> io::Result<()> {
         }
         Request::Destroy => {
             ctx.client.shm.shm_pools.retain(|x| *x != ctx.proxy);
-            ctx.state
+            match ctx
+                .state
                 .backend
                 .renderer_state()
-                .shm_pool_resource_destroyed(ctx.proxy);
+                .get_shm_state()
+                .entry(ctx.proxy)
+            {
+                hash_map::Entry::Vacant(_) => unreachable!(),
+                hash_map::Entry::Occupied(shm_pool) => {
+                    if shm_pool.get().refcnt == 0 {
+                        shm_pool.remove();
+                    }
+                }
+            }
         }
         Request::Resize(new_size) => {
             if new_size > 0 {
-                ctx.state
+                let new_size = new_size as usize;
+                let pool = ctx
+                    .state
                     .backend
                     .renderer_state()
-                    .resize_shm_pool(ctx.proxy, new_size as usize);
+                    .get_shm_state()
+                    .get_mut(&ctx.proxy)
+                    .unwrap();
+                if new_size > pool.size {
+                    pool.size = new_size;
+                    unsafe {
+                        pool.memmap
+                            .remap(new_size, memmap2::RemapOptions::new().may_move(true))?
+                    };
+                }
             }
         }
     }

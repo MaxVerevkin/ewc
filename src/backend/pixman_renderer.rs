@@ -2,19 +2,15 @@ use std::collections::HashMap;
 use std::num::NonZeroU64;
 
 use super::*;
-use crate::{protocol::*, Proxy};
+use crate::globals::shm::ShmPool;
+use crate::protocol::*;
+use crate::Proxy;
 
 pub struct RendererStateImp {
     shm_pools: HashMap<WlShmPool, ShmPool>,
     resource_mapping: HashMap<WlBuffer, BufferId>,
     buffers: HashMap<BufferId, Buffer>,
     next_id: NonZeroU64,
-}
-
-struct ShmPool {
-    memmap: memmap2::Mmap,
-    size: usize,
-    refcnt: usize,
 }
 
 struct Buffer {
@@ -91,6 +87,10 @@ impl RendererState for RendererStateImp {
         &[wl_shm::Format::Argb8888, wl_shm::Format::Xrgb8888]
     }
 
+    fn get_shm_state(&mut self) -> &mut HashMap<protocol::WlShmPool, ShmPool> {
+        &mut self.shm_pools
+    }
+
     fn create_argb8_texture(&mut self, width: u32, height: u32, bytes: &[u8]) -> BufferId {
         let id = BufferId(next_id(&mut self.next_id));
         self.buffers.insert(
@@ -101,36 +101,6 @@ impl RendererState for RendererStateImp {
             },
         );
         id
-    }
-
-    fn create_shm_pool(&mut self, fd: OwnedFd, size: usize, resource: WlShmPool) {
-        self.shm_pools.insert(
-            resource,
-            ShmPool {
-                memmap: unsafe { memmap2::MmapOptions::new().len(size).map(&fd).unwrap() },
-                size,
-                refcnt: 0,
-            },
-        );
-    }
-
-    fn resize_shm_pool(&mut self, pool: WlShmPool, new_size: usize) {
-        let pool = self.shm_pools.get_mut(&pool).unwrap();
-        if new_size > pool.size {
-            pool.size = new_size;
-            unsafe {
-                pool.memmap
-                    .remap(new_size, memmap2::RemapOptions::new().may_move(true))
-                    .unwrap()
-            };
-        }
-    }
-
-    fn shm_pool_resource_destroyed(&mut self, pool: WlShmPool) {
-        let shm_pool = self.shm_pools.get(&pool).unwrap();
-        if shm_pool.refcnt == 0 {
-            self.shm_pools.remove(&pool);
-        }
     }
 
     fn create_shm_buffer(&mut self, spec: ShmBufferSpec, resource: WlBuffer) {

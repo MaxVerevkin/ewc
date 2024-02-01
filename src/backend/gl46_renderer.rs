@@ -6,6 +6,7 @@ use wayrs_protocols::linux_dmabuf_unstable_v1::zwp_linux_dmabuf_feedback_v1::Tra
 use wayrs_utils::dmabuf_feedback::DmabufFeedback;
 
 use super::*;
+use crate::globals::shm::ShmPool;
 use crate::protocol::*;
 use crate::wl_shm;
 use crate::Proxy;
@@ -30,12 +31,6 @@ pub struct RendererStateImp {
     gl: Box<gl46::GlFns>,
     _context: eglgbm::EglContext,
     egl: eglgbm::EglDisplay,
-}
-
-struct ShmPool {
-    memmap: memmap2::Mmap,
-    size: usize,
-    refcnt: usize,
 }
 
 struct Texture {
@@ -217,6 +212,10 @@ impl RendererState for RendererStateImp {
         &[wl_shm::Format::Argb8888, wl_shm::Format::Xrgb8888]
     }
 
+    fn get_shm_state(&mut self) -> &mut HashMap<protocol::WlShmPool, ShmPool> {
+        &mut self.shm_pools
+    }
+
     fn create_argb8_texture(&mut self, width: u32, height: u32, bytes: &[u8]) -> BufferId {
         let gl_name = unsafe {
             create_texture(
@@ -239,36 +238,6 @@ impl RendererState for RendererStateImp {
             },
         );
         new_id
-    }
-
-    fn create_shm_pool(&mut self, fd: OwnedFd, size: usize, resource: WlShmPool) {
-        self.shm_pools.insert(
-            resource,
-            ShmPool {
-                memmap: unsafe { memmap2::MmapOptions::new().len(size).map(&fd).unwrap() },
-                size,
-                refcnt: 0,
-            },
-        );
-    }
-
-    fn resize_shm_pool(&mut self, pool: WlShmPool, new_size: usize) {
-        let pool = self.shm_pools.get_mut(&pool).unwrap();
-        if new_size > pool.size {
-            pool.size = new_size;
-            unsafe {
-                pool.memmap
-                    .remap(new_size, memmap2::RemapOptions::new().may_move(true))
-                    .unwrap()
-            };
-        }
-    }
-
-    fn shm_pool_resource_destroyed(&mut self, pool: WlShmPool) {
-        let shm_pool = self.shm_pools.get_mut(&pool).unwrap();
-        if shm_pool.refcnt == 0 {
-            self.shm_pools.remove(&pool);
-        }
     }
 
     fn create_shm_buffer(&mut self, spec: ShmBufferSpec, resource: WlBuffer) {
