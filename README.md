@@ -7,7 +7,7 @@ Wayland compositor from scratch in Rust.
 
 ## Roadmap
 
-- [x] Enough to run `foot`.
+- [x] Enough to run `foot`, `alacritty` and `mpv`.
 - [x] Sowfware (`pixman`) renderer.
 - [x] OpenGL renderer.
 - [x] Nested wayland backend.
