@@ -19,8 +19,8 @@ pub struct EglDisplay {
     extensions: EglExtensions,
     supported_formats: FormatTable,
 
-    pub(crate) egl_image_target_renderbuffer_starage_oes:
-        egl_ffi::EglImageTargetRenderbufferStorageOesProc,
+    egl_image_target_renderbuffer_starage_oes: egl_ffi::EglImageTargetRenderbufferStorageOesProc,
+    egl_image_target_texture_2d_oes: egl_ffi::EglImageTargetTexture2dOesProc,
 }
 
 impl EglDisplay {
@@ -99,6 +99,12 @@ impl EglDisplay {
             )
             .ok_or(Error::ExtensionUnsupported("GL_OES_EGL_image"))?
         };
+        let egl_image_target_texture_2d_oes = unsafe {
+            std::mem::transmute::<_, Option<egl_ffi::EglImageTargetRenderbufferStorageOesProc>>(
+                egl_ffi::eglGetProcAddress(b"glEGLImageTargetTexture2DOES\0".as_ptr() as *const _),
+            )
+            .ok_or(Error::ExtensionUnsupported("GL_OES_EGL_image"))?
+        };
 
         let supported_formats = unsafe {
             get_supported_formats(
@@ -120,11 +126,8 @@ impl EglDisplay {
             supported_formats,
 
             egl_image_target_renderbuffer_starage_oes,
+            egl_image_target_texture_2d_oes,
         })
-    }
-
-    pub(crate) fn as_raw(&self) -> egl_ffi::EGLDisplay {
-        self.raw
     }
 
     pub(crate) fn gbm_device(&self) -> &gbm::Device {
@@ -168,20 +171,23 @@ impl EglDisplay {
         modifiers: &[u64],
         scan_out: bool,
     ) -> Result<(EglImage, BufferExport)> {
-        let raw_egl_display = self.as_raw();
-
         let buf_parts = self
             .gbm_device()
             .alloc_buffer(width, height, fourcc, modifiers, scan_out)?
             .export();
+        let egl_image = self.import_as_egl_image(&buf_parts)?;
+        Ok((egl_image, buf_parts))
+    }
 
+    /// Import a buffer as an EglImage
+    pub fn import_as_egl_image(&self, buf_parts: &BufferExport) -> Result<EglImage> {
         let mut egl_image_attrs = Vec::with_capacity(7 + 10 * buf_parts.planes.len());
         egl_image_attrs.push(egl_ffi::EGL_WIDTH as _);
-        egl_image_attrs.push(width as _);
+        egl_image_attrs.push(buf_parts.width as _);
         egl_image_attrs.push(egl_ffi::EGL_HEIGHT as _);
-        egl_image_attrs.push(height as _);
+        egl_image_attrs.push(buf_parts.height as _);
         egl_image_attrs.push(egl_ffi::EGL_LINUX_DRM_FOURCC_EXT as _);
-        egl_image_attrs.push(fourcc.0 as _);
+        egl_image_attrs.push(buf_parts.format.0 as _);
         for (i, plane) in buf_parts.planes.iter().enumerate() {
             egl_image_attrs.push(egl_ffi::EGL_DMA_BUF_PLANE_FD_EXT[i] as _);
             egl_image_attrs.push(plane.dmabuf.as_raw_fd() as _);
@@ -198,7 +204,7 @@ impl EglDisplay {
 
         let egl_image = unsafe {
             egl_ffi::eglCreateImage(
-                raw_egl_display,
+                self.raw,
                 egl_ffi::EGL_NO_CONTEXT,
                 egl_ffi::EGL_LINUX_DMA_BUF_EXT,
                 egl_ffi::EGLClientBuffer(std::ptr::null_mut()),
@@ -209,15 +215,13 @@ impl EglDisplay {
             return Err(Error::last_egl());
         }
 
-        Ok((
-            EglImage {
-                egl_display: raw_egl_display,
-                egl_image,
-                egl_image_target_renderbuffer_starage_oes: self
-                    .egl_image_target_renderbuffer_starage_oes,
-            },
-            buf_parts,
-        ))
+        Ok(EglImage {
+            egl_display: self.raw,
+            egl_image,
+            egl_image_target_renderbuffer_starage_oes: self
+                .egl_image_target_renderbuffer_starage_oes,
+            egl_image_target_texture_2d_oes: self.egl_image_target_texture_2d_oes,
+        })
     }
 }
 
@@ -492,6 +496,7 @@ pub struct EglImage {
     egl_display: egl_ffi::EGLDisplay,
     egl_image: egl_ffi::EGLImage,
     egl_image_target_renderbuffer_starage_oes: egl_ffi::EglImageTargetRenderbufferStorageOesProc,
+    egl_image_target_texture_2d_oes: egl_ffi::EglImageTargetTexture2dOesProc,
 }
 
 impl EglImage {
@@ -513,6 +518,20 @@ impl EglImage {
         const GL_RENDERBUFFER: egl_ffi::EGLenum = 0x8D41;
         unsafe {
             (self.egl_image_target_renderbuffer_starage_oes)(GL_RENDERBUFFER, self.egl_image);
+        }
+    }
+
+    /// Associate this buffer with a currently bound GL_TEXTURE_2D texture.
+    ///
+    /// This allows sample from this buffer.
+    ///
+    /// # Safety
+    ///
+    /// Analagous to [`set_as_gl_renderbuffer_storage`](Self::set_as_gl_renderbuffer_storage).
+    pub unsafe fn set_as_gl_texture_2d(&self) {
+        const GL_TEXTURE_2D: egl_ffi::EGLenum = 0x0DE1;
+        unsafe {
+            (self.egl_image_target_texture_2d_oes)(GL_TEXTURE_2D, self.egl_image);
         }
     }
 }

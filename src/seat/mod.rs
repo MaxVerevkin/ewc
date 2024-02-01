@@ -66,6 +66,11 @@ impl Seat {
         if self.keyboard.focused_surface == surface {
             return;
         }
+        if let Some(old_surf) = &self.keyboard.focused_surface {
+            if !old_surf.is_alive() {
+                self.keyboard.focused_surface = None;
+            }
+        }
         if let Some(surface) = &surface {
             if self
                 .keyboard

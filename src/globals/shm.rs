@@ -3,12 +3,12 @@ use std::io;
 use std::os::fd::OwnedFd;
 
 use super::IsGlobal;
-use crate::backend::ShmBufferSpec;
 use crate::client::RequestCtx;
 use crate::protocol::*;
 use crate::wayland_core::Proxy;
 use crate::{Client, State};
 
+#[derive(Default)]
 pub struct Shm {
     pub shm_pools: Vec<WlShmPool>,
     pub wl_buffers: Vec<WlBuffer>,
@@ -18,6 +18,15 @@ pub struct ShmPool {
     pub memmap: memmap2::Mmap,
     pub size: usize,
     pub refcnt: usize,
+}
+
+pub struct ShmBufferSpec {
+    pub pool: WlShmPool,
+    pub offset: u32,
+    pub width: u32,
+    pub height: u32,
+    pub stride: u32,
+    pub wl_format: wl_shm::Format,
 }
 
 impl ShmPool {
@@ -31,13 +40,6 @@ impl ShmPool {
 }
 
 impl Shm {
-    pub fn new() -> Self {
-        Self {
-            shm_pools: Vec::new(),
-            wl_buffers: Vec::new(),
-        }
-    }
-
     pub fn destroy(self, state: &mut State) {
         for buffer in self.wl_buffers {
             state

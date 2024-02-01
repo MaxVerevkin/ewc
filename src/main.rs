@@ -30,6 +30,7 @@ use crate::event_loop::EventLoop;
 use crate::focus_stack::FocusStack;
 use crate::globals::compositor::{Compositor, Surface};
 use crate::globals::ewc_debug::Debugger;
+use crate::globals::linux_dmabuf::LinuxDmabuf;
 use crate::globals::GlobalsManager;
 use crate::protocol::xdg_toplevel::ResizeEdge;
 use crate::protocol::*;
@@ -120,6 +121,13 @@ impl Server {
         globals.add_global::<WlShm>(1);
         globals.add_global::<WlOutput>(2);
         globals.add_global::<EwcDebugV1>(1);
+        if backend
+            .renderer_state()
+            .supported_dma_buf_formats()
+            .is_some()
+        {
+            LinuxDmabuf::register_global(&mut globals);
+        }
         Self {
             socket,
             socket_path,

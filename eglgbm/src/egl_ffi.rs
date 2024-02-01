@@ -23,6 +23,8 @@ pub type EglQueryDmabufModifiersExtProc = unsafe extern "system" fn(
 
 pub type EglImageTargetRenderbufferStorageOesProc =
     unsafe extern "system" fn(target: EGLenum, image: EGLImage);
+pub type EglImageTargetTexture2dOesProc =
+    unsafe extern "system" fn(target: EGLenum, image: EGLImage);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]

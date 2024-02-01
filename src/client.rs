@@ -7,6 +7,7 @@ use std::os::unix::net::UnixStream;
 use std::rc::Rc;
 
 use crate::globals::compositor::Compositor;
+use crate::globals::linux_dmabuf::LinuxDmabuf;
 use crate::globals::shm::Shm;
 use crate::protocol::*;
 use crate::seat::{ClientSeat, DataSource};
@@ -143,6 +144,7 @@ pub struct Client {
     pub compositor: Compositor,
     pub shm: Shm,
     pub data_sources: HashMap<WlDataSource, DataSource>,
+    pub linux_dambuf: LinuxDmabuf,
 }
 
 impl Client {
@@ -152,8 +154,9 @@ impl Client {
         Self {
             conn,
             compositor: Compositor::default(),
-            shm: Shm::new(),
+            shm: Shm::default(),
             data_sources: HashMap::new(),
+            linux_dambuf: LinuxDmabuf::default(),
         }
     }
 

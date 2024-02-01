@@ -261,6 +261,7 @@ pub fn new() -> Option<Box<dyn Backend>> {
     }))
 }
 
+#[allow(clippy::large_enum_variant)]
 enum RendererKind {
     Pixman {
         swapchain: [DumbBuffer; 2],

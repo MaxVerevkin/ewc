@@ -9,7 +9,8 @@ mod gl46_renderer;
 mod pixman_renderer;
 pub mod wayland;
 
-use crate::globals::shm::ShmPool;
+use crate::globals::linux_dmabuf::DmaBufSpec;
+use crate::globals::shm::{ShmBufferSpec, ShmPool};
 use crate::protocol;
 
 pub trait Backend {
@@ -26,23 +27,16 @@ pub trait Backend {
 
 pub trait RendererState: Any {
     fn supported_shm_formats(&self) -> &[protocol::wl_shm::Format];
+    fn supported_dma_buf_formats(&self) -> Option<&eglgbm::FormatTable>;
     fn get_shm_state(&mut self) -> &mut HashMap<protocol::WlShmPool, ShmPool>;
     fn create_argb8_texture(&mut self, width: u32, height: u32, bytes: &[u8]) -> BufferId;
     fn create_shm_buffer(&mut self, spec: ShmBufferSpec, resource: protocol::WlBuffer);
+    fn create_dma_buffer(&mut self, spec: DmaBufSpec, resource: protocol::WlBuffer);
     fn buffer_commited(&mut self, buffer_resource: protocol::WlBuffer) -> BufferId;
     fn get_buffer_size(&self, buffer_id: BufferId) -> (u32, u32);
     fn buffer_lock(&mut self, buffer_id: BufferId);
     fn buffer_unlock(&mut self, buffer_id: BufferId);
     fn buffer_resource_destroyed(&mut self, resource: protocol::WlBuffer);
-}
-
-pub struct ShmBufferSpec {
-    pub pool: protocol::WlShmPool,
-    pub offset: u32,
-    pub width: u32,
-    pub height: u32,
-    pub stride: u32,
-    pub wl_format: protocol::wl_shm::Format,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

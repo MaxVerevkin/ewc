@@ -13,12 +13,16 @@ use crate::Proxy;
 
 const DRM_FORMAT_XRGB8888: Fourcc = Fourcc(u32::from_le_bytes(*b"XR24"));
 
+static mut TEXCNT: u32 = 0;
+
 pub struct RendererStateImp {
     shm_pools: HashMap<WlShmPool, ShmPool>,
     shm_buffers: HashMap<WlBuffer, ShmBufferSpec>,
+    dma_buffers: HashMap<WlBuffer, BufferId>,
     textures: HashMap<BufferId, Texture>,
     next_id: NonZeroU64,
 
+    format_table: FormatTable,
     fourcc: Fourcc,
     mods: Vec<u64>,
 
@@ -38,6 +42,7 @@ struct Texture {
     width: u32,
     height: u32,
     locks: u32,
+    resource: Option<WlBuffer>,
 }
 
 impl RendererStateImp {
@@ -112,19 +117,28 @@ impl RendererStateImp {
             gl.Uniform1iv(1, units.len() as i32, units.as_ptr());
         }
 
-        let (fourcc, mods) = match feedback {
-            Some(feedback) => select_format_from_feedback(&egl, feedback),
-            None => select_format_from_format_table(&egl, format_table.unwrap()),
+        let format_table = match feedback {
+            Some(feedback) => format_table_from_feedback(&egl, feedback),
+            None => filter_format_table(&egl, format_table.unwrap()),
         };
+
+        let fourcc = DRM_FORMAT_XRGB8888;
+        let mods = format_table
+            .get(&fourcc)
+            .expect("xrgb8888 not supported")
+            .clone();
 
         Some(Self {
             shm_pools: HashMap::new(),
             shm_buffers: HashMap::new(),
+            dma_buffers: HashMap::new(),
             textures: HashMap::new(),
             next_id: NonZeroU64::MIN,
 
+            format_table,
             fourcc,
             mods,
+
             verts_buffer,
             verts: Vec::new(),
 
@@ -200,16 +214,31 @@ impl RendererStateImp {
         }
     }
 
-    fn drop_buffer(&mut self, buffer_id: BufferId) {
-        let buffer = self.textures.remove(&buffer_id).unwrap();
+    fn consider_dropping_buffer(&mut self, buffer_id: BufferId) {
+        let buffer = self.textures.get(&buffer_id).unwrap();
         assert_eq!(buffer.locks, 0);
-        unsafe { self.gl.DeleteTextures(1, &buffer.gl_name) };
+        if let Some(resource) = &buffer.resource {
+            if resource.is_alive() {
+                resource.release();
+                return;
+            }
+        }
+        let buffer = self.textures.remove(&buffer_id).unwrap();
+        unsafe {
+            TEXCNT -= 1;
+            self.gl.DeleteTextures(1, &buffer.gl_name);
+            dbg!(TEXCNT);
+        };
     }
 }
 
 impl RendererState for RendererStateImp {
     fn supported_shm_formats(&self) -> &[protocol::wl_shm::Format] {
         &[wl_shm::Format::Argb8888, wl_shm::Format::Xrgb8888]
+    }
+
+    fn supported_dma_buf_formats(&self) -> Option<&eglgbm::FormatTable> {
+        Some(&self.format_table)
     }
 
     fn get_shm_state(&mut self) -> &mut HashMap<protocol::WlShmPool, ShmPool> {
@@ -235,6 +264,7 @@ impl RendererState for RendererStateImp {
                 width,
                 height,
                 locks: 1,
+                resource: None,
             },
         );
         new_id
@@ -245,7 +275,77 @@ impl RendererState for RendererStateImp {
         self.shm_buffers.insert(resource, spec);
     }
 
+    fn create_dma_buffer(&mut self, spec: DmaBufSpec, resource: protocol::WlBuffer) {
+        let buf_parts = BufferExport {
+            width: spec.width,
+            height: spec.height,
+            format: spec.format,
+            modifier: spec.planes[0].modifier,
+            planes: spec
+                .planes
+                .into_iter()
+                .map(|p| eglgbm::BufferPlane {
+                    dmabuf: p.fd,
+                    handle: 0,
+                    offset: p.offset,
+                    stride: p.stride,
+                })
+                .collect(),
+        };
+        let egl_image = self
+            .egl
+            .import_as_egl_image(&buf_parts)
+            .expect("could not import dmabuf");
+
+        let mut gl_name = 0;
+        unsafe {
+            self.gl.GenTextures(1, &mut gl_name);
+            TEXCNT += 1;
+            self.gl.BindTexture(gl46::GL_TEXTURE_2D, gl_name);
+            self.gl.TexParameteri(
+                gl46::GL_TEXTURE_2D,
+                gl46::GL_TEXTURE_MIN_FILTER,
+                gl46::GL_NEAREST.0 as i32,
+            );
+            self.gl.TexParameteri(
+                gl46::GL_TEXTURE_2D,
+                gl46::GL_TEXTURE_MAG_FILTER,
+                gl46::GL_NEAREST.0 as i32,
+            );
+            self.gl.TexParameteri(
+                gl46::GL_TEXTURE_2D,
+                gl46::GL_TEXTURE_WRAP_S,
+                gl46::GL_CLAMP_TO_EDGE.0 as i32,
+            );
+            self.gl.TexParameteri(
+                gl46::GL_TEXTURE_2D,
+                gl46::GL_TEXTURE_WRAP_T,
+                gl46::GL_CLAMP_TO_EDGE.0 as i32,
+            );
+            egl_image.set_as_gl_texture_2d();
+            self.gl.BindTexture(gl46::GL_TEXTURE_2D, 0);
+        }
+
+        let new_id = BufferId(next_id(&mut self.next_id));
+        self.textures.insert(
+            new_id,
+            Texture {
+                gl_name,
+                width: spec.width,
+                height: spec.height,
+                locks: 0,
+                resource: Some(resource.clone()),
+            },
+        );
+        self.dma_buffers.insert(resource, new_id);
+    }
+
     fn buffer_commited(&mut self, buffer_resource: WlBuffer) -> BufferId {
+        if let Some(dma) = self.dma_buffers.get(&buffer_resource) {
+            self.textures.get_mut(dma).unwrap().locks += 1;
+            return *dma;
+        }
+
         let spec = self.shm_buffers.get(&buffer_resource).unwrap();
 
         buffer_resource.release();
@@ -271,6 +371,7 @@ impl RendererState for RendererStateImp {
                 width: spec.width,
                 height: spec.height,
                 locks: 1,
+                resource: None,
             },
         );
         new_id
@@ -290,11 +391,17 @@ impl RendererState for RendererStateImp {
         let buf = self.textures.get_mut(&buffer_id).unwrap();
         buf.locks -= 1;
         if buf.locks == 0 {
-            self.drop_buffer(buffer_id);
+            self.consider_dropping_buffer(buffer_id);
         }
     }
 
     fn buffer_resource_destroyed(&mut self, resource: WlBuffer) {
+        if let Some(dma) = self.dma_buffers.remove(&resource) {
+            self.textures.get_mut(&dma).unwrap().resource = None;
+            self.consider_dropping_buffer(dma);
+            return;
+        }
+
         let shm_spec = self.shm_buffers.remove(&resource).unwrap();
         let shm_pool = self.shm_pools.get_mut(&shm_spec.pool).unwrap();
         shm_pool.refcnt -= 1;
@@ -447,12 +554,9 @@ impl Framebuffer {
     }
 }
 
-fn select_format_from_feedback(
-    egl: &eglgbm::EglDisplay,
-    feedback: DmabufFeedback,
-) -> (Fourcc, Vec<u64>) {
+fn format_table_from_feedback(egl: &eglgbm::EglDisplay, feedback: DmabufFeedback) -> FormatTable {
     let format_table = feedback.format_table();
-    let mut formats = HashMap::<Fourcc, Vec<u64>>::new();
+    let mut formats = FormatTable::new();
 
     for tranche in feedback.tranches() {
         if tranche.flags.contains(TrancheFlags::Scanout) {
@@ -469,19 +573,11 @@ fn select_format_from_feedback(
         }
     }
 
-    (
-        DRM_FORMAT_XRGB8888,
-        formats
-            .remove(&DRM_FORMAT_XRGB8888)
-            .expect("xrgb8888 not supported"),
-    )
+    formats
 }
 
-fn select_format_from_format_table(
-    egl: &eglgbm::EglDisplay,
-    format_table: &FormatTable,
-) -> (Fourcc, Vec<u64>) {
-    let mut formats = HashMap::<Fourcc, Vec<u64>>::new();
+fn filter_format_table(egl: &eglgbm::EglDisplay, format_table: &FormatTable) -> FormatTable {
+    let mut formats = FormatTable::new();
 
     for (&format, modifiers) in format_table {
         for &modifier in modifiers {
@@ -491,12 +587,7 @@ fn select_format_from_format_table(
         }
     }
 
-    (
-        DRM_FORMAT_XRGB8888,
-        formats
-            .remove(&DRM_FORMAT_XRGB8888)
-            .expect("xrgb8888 not supported"),
-    )
+    formats
 }
 
 unsafe fn create_shader(gl: &gl46::GlFns, texture_units: u32) -> u32 {
@@ -618,6 +709,7 @@ unsafe fn create_texture(
 ) -> u32 {
     let mut tex = 0;
     gl.CreateTextures(gl46::GL_TEXTURE_2D, 1, &mut tex);
+    TEXCNT += 1;
     gl.TextureParameteri(tex, gl46::GL_TEXTURE_MIN_FILTER, gl46::GL_NEAREST.0 as i32);
     gl.TextureParameteri(tex, gl46::GL_TEXTURE_MAG_FILTER, gl46::GL_NEAREST.0 as i32);
     gl.TextureParameteri(

@@ -87,6 +87,10 @@ impl RendererState for RendererStateImp {
         &[wl_shm::Format::Argb8888, wl_shm::Format::Xrgb8888]
     }
 
+    fn supported_dma_buf_formats(&self) -> Option<&eglgbm::FormatTable> {
+        None
+    }
+
     fn get_shm_state(&mut self) -> &mut HashMap<protocol::WlShmPool, ShmPool> {
         &mut self.shm_pools
     }
@@ -118,6 +122,10 @@ impl RendererState for RendererStateImp {
                 }),
             },
         );
+    }
+
+    fn create_dma_buffer(&mut self, _spec: DmaBufSpec, _resource: protocol::WlBuffer) {
+        panic!("not supproted");
     }
 
     fn buffer_commited(&mut self, resource: WlBuffer) -> BufferId {
