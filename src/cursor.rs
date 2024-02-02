@@ -75,7 +75,9 @@ impl Cursor {
         match &self.kind {
             Kind::Hidden => None,
             Kind::Surface { surface, hx, hy } => {
-                let (w, h) = surface.effective_buffer_size()?;
+                let buf_transform = surface.buf_transform()?;
+                let w = buf_transform.buf_width;
+                let h = buf_transform.buf_height;
                 surface
                     .cur
                     .borrow()

@@ -158,12 +158,11 @@ fn render_surface(frame: &mut dyn Frame, surf: &Surface, alpha: f32, x: i32, y: 
     for frame_cb in surf.cur.borrow_mut().frame_cbs.drain(..) {
         frame_cb.done(frame.time());
     }
-    let Some((buf_id, _, _)) = surf.cur.borrow().buffer else { return };
+    let Some(buf_transform) = surf.buf_transform() else { return };
     frame.render_buffer(
-        buf_id,
         surf.cur.borrow().opaque_region.as_ref(),
         alpha,
-        surf.buffer_transform().unwrap(),
+        buf_transform,
         x,
         y,
     );
@@ -325,11 +324,13 @@ impl Server {
                         }
                         if let Some((buf_id, hx, hy, w, h)) = self.state.cursor.get_buffer() {
                             frame.render_buffer(
-                                buf_id,
                                 None,
                                 1.0,
                                 // TODO: support transform on cursors
                                 BufferTransform {
+                                    buf_id,
+                                    buf_width: w,
+                                    buf_height: h,
                                     transform: wl_output::Transform::Normal,
                                     scale: 1,
                                     src_x: 0.0,

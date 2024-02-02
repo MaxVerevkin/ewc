@@ -54,10 +54,9 @@ pub trait Frame {
     fn clear(&mut self, r: f32, g: f32, b: f32);
     fn render_buffer(
         &mut self,
-        buf: BufferId,
         opaque_region: Option<&pixman::Region32>,
         alpha: f32,
-        transform: BufferTransform,
+        buf_transform: BufferTransform,
         x: i32,
         y: i32,
     );

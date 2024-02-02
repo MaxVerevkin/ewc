@@ -30,11 +30,11 @@ impl FocusStack {
                     return Some(res);
                 }
             }
-            let (w, h) = surf.effective_buffer_size()?;
+            let buf_transform = surf.buf_transform()?;
             let ok = x >= 0.0
                 && y >= 0.0
-                && x < w as f32
-                && y < h as f32
+                && x < buf_transform.dst_width as f32
+                && y < buf_transform.dst_height as f32
                 && surf.cur.borrow().input_region.as_ref().map_or(true, |reg| {
                     reg.contains_point(x.round() as i32, y.round() as i32)
                         .is_some()

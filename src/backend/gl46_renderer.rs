@@ -433,10 +433,9 @@ impl Frame for FrameImp<'_> {
 
     fn render_buffer(
         &mut self,
-        buf: BufferId,
         _opaque_region: Option<&pixman::Region32>,
         alpha: f32,
-        transform: BufferTransform,
+        buf_transform: BufferTransform,
         x: i32,
         y: i32,
     ) {
@@ -444,26 +443,32 @@ impl Frame for FrameImp<'_> {
             self.state.flush_quads();
         }
 
-        let tex = &self.state.textures[&buf];
-        let uv_mat = transform.surface_to_uv(tex.width, tex.height).unwrap();
+        let tex = &self.state.textures[&buf_transform.buf_id];
+        assert_eq!(tex.width, buf_transform.buf_width);
+        assert_eq!(tex.height, buf_transform.buf_height);
+        let uv_mat = buf_transform.surface_to_uv().unwrap();
 
         let tl = uv_mat
             .transform_point(pixman::FVector::new([0.0, 0.0, 1.0]))
             .unwrap();
         let tr = uv_mat
-            .transform_point(pixman::FVector::new([transform.dst_width as f64, 0.0, 1.0]))
+            .transform_point(pixman::FVector::new([
+                buf_transform.dst_width as f64,
+                0.0,
+                1.0,
+            ]))
             .unwrap();
         let bl = uv_mat
             .transform_point(pixman::FVector::new([
                 0.0,
-                transform.dst_height as f64,
+                buf_transform.dst_height as f64,
                 1.0,
             ]))
             .unwrap();
         let br = uv_mat
             .transform_point(pixman::FVector::new([
-                transform.dst_width as f64,
-                transform.dst_height as f64,
+                buf_transform.dst_width as f64,
+                buf_transform.dst_height as f64,
                 1.0,
             ]))
             .unwrap();
@@ -486,10 +491,10 @@ impl Frame for FrameImp<'_> {
         };
         self.state.bound_textures += 1;
         self.state.verts.push(vert);
-        vert.x = (x + transform.dst_width as i32) as f32;
+        vert.x = (x + buf_transform.dst_width as i32) as f32;
         vert.col = Color::from_tex_uv(tr.0, tr.1, tex_i, alpha);
         self.state.verts.push(vert);
-        vert.y = (y + transform.dst_height as i32) as f32;
+        vert.y = (y + buf_transform.dst_height as i32) as f32;
         vert.col = Color::from_tex_uv(br.0, br.1, tex_i, alpha);
         self.state.verts.push(vert);
         self.state.verts.push(vert);

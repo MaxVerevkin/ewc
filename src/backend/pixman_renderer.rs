@@ -219,14 +219,13 @@ impl Frame for FrameImp<'_> {
 
     fn render_buffer(
         &mut self,
-        buf: BufferId,
         opaque_region: Option<&pixman::Region32>,
         alpha: f32,
-        transform: BufferTransform,
+        buf_transform: BufferTransform,
         x: i32,
         y: i32,
     ) {
-        let buf = &self.state.buffers[&buf];
+        let buf = &self.state.buffers[&buf_transform.buf_id];
         let (bytes, tex_width, tex_height, stride, format) = match &buf.kind {
             BufferKind::Shm(shm) => {
                 let spec = &shm.spec;
@@ -239,6 +238,8 @@ impl Frame for FrameImp<'_> {
                 (bytes.as_slice(), *w, *h, *w * 4, wl_shm::Format::Argb8888)
             }
         };
+        assert_eq!(tex_width, buf_transform.buf_width);
+        assert_eq!(tex_height, buf_transform.buf_height);
 
         let src = unsafe {
             pixman::Image::from_raw_mut(
@@ -252,8 +253,8 @@ impl Frame for FrameImp<'_> {
             .unwrap()
         };
 
-        let uv_mat = transform.surface_to_buffer(tex_width, tex_height).unwrap();
-        src.set_transform(pixman::Transform::try_from(uv_mat).unwrap())
+        let mat = buf_transform.surface_to_buffer().unwrap();
+        src.set_transform(pixman::Transform::try_from(mat).unwrap())
             .unwrap();
 
         let buf_rect = pixman::Box32 {
@@ -281,7 +282,10 @@ impl Frame for FrameImp<'_> {
             (0, 0),
             (0, 0),
             (x, y),
-            (transform.dst_width as i32, transform.dst_height as i32),
+            (
+                buf_transform.dst_width as i32,
+                buf_transform.dst_height as i32,
+            ),
         );
     }
 
