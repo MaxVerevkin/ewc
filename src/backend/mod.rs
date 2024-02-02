@@ -54,10 +54,10 @@ pub trait Frame {
     fn render_buffer(
         &mut self,
         buf: BufferId,
+        transform: protocol::wl_output::Transform,
         opaque_region: Option<&pixman::Region32>,
         alpha: f32,
-        x: i32,
-        y: i32,
+        target: pixman::Rectangle32,
     );
     fn render_rect(&mut self, color: Color, rect: pixman::Rectangle32);
 }
@@ -74,6 +74,15 @@ pub struct Color {
 impl Color {
     pub fn from_rgba(r: f32, g: f32, b: f32, a: f32) -> Self {
         Self { r, g, b, a }
+    }
+
+    pub fn from_tex_uv(u: f32, v: f32, tex_i: u32, a: f32) -> Self {
+        Self {
+            r: u,
+            g: v,
+            b: tex_i as f32,
+            a: -1.0 - a,
+        }
     }
 }
 

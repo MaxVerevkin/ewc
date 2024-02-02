@@ -434,54 +434,106 @@ impl Frame for FrameImp<'_> {
     fn render_buffer(
         &mut self,
         buf: BufferId,
+        transform: wl_output::Transform,
         _opaque_region: Option<&pixman::Region32>,
         alpha: f32,
-        x: i32,
-        y: i32,
+        target: pixman::Rectangle32,
     ) {
         if self.state.bound_textures == self.state.texture_units {
             self.state.flush_quads();
         }
 
-        let tex = &self.state.textures[&buf];
+        let uv_mat = {
+            use pixman::Transform as Mat;
+            let mut mat = Mat::identity();
+            if transform as u32 & 4 != 0 {
+                mat = mat
+                    .scale(-1.0, 1.0, false)
+                    .unwrap()
+                    .translate(1.0, 0.0, false)
+                    .unwrap();
+            }
+            if transform as u32 & 1 != 0 {
+                mat = mat
+                    .rotate(0.0, -1.0, false)
+                    .unwrap()
+                    .translate(0.0, 1.0, false)
+                    .unwrap();
+            }
+            if transform as u32 & 2 != 0 {
+                mat = mat
+                    .rotate(-1.0, 0.0, false)
+                    .unwrap()
+                    .translate(1.0, 1.0, false)
+                    .unwrap();
+            }
+            mat
+        };
+
+        let tl = uv_mat
+            .transform_point(pixman::Vector::new([0, 0, 1]))
+            .unwrap();
+        let tr = uv_mat
+            .transform_point(pixman::Vector::new([1, 0, 1]))
+            .unwrap();
+        let bl = uv_mat
+            .transform_point(pixman::Vector::new([0, 1, 1]))
+            .unwrap();
+        let br = uv_mat
+            .transform_point(pixman::Vector::new([1, 1, 1]))
+            .unwrap();
+
+        let tl = (
+            (tl.x().into_raw() as f64 / 65536.0) as f32,
+            (tl.y().into_raw() as f64 / 65536.0) as f32,
+        );
+        let tr = (
+            (tr.x().into_raw() as f64 / 65536.0) as f32,
+            (tr.y().into_raw() as f64 / 65536.0) as f32,
+        );
+        let bl = (
+            (bl.x().into_raw() as f64 / 65536.0) as f32,
+            (bl.y().into_raw() as f64 / 65536.0) as f32,
+        );
+        let br = (
+            (br.x().into_raw() as f64 / 65536.0) as f32,
+            (br.y().into_raw() as f64 / 65536.0) as f32,
+        );
+
         unsafe {
+            let tex = &self.state.textures[&buf];
             self.state
                 .gl
                 .BindTextureUnit(self.state.bound_textures, tex.gl_name);
         }
+        let tex_i = self.state.bound_textures;
         let mut vert = Vert {
-            x: x as f32,
-            y: y as f32,
-            r: 0.0,
-            g: 0.0,
-            b: self.state.bound_textures as f32,
-            a: -1.0 - alpha,
+            x: target.x as f32,
+            y: target.y as f32,
+            col: Color::from_tex_uv(tl.0, tl.1, tex_i, alpha),
         };
         self.state.bound_textures += 1;
         self.state.verts.push(vert);
-        vert.x = (x + tex.width as i32) as f32;
-        vert.r = 1.0;
+        vert.x = (target.x + target.width as i32) as f32;
+        vert.col = Color::from_tex_uv(tr.0, tr.1, tex_i, alpha);
         self.state.verts.push(vert);
-        vert.y = (y + tex.height as i32) as f32;
-        vert.g = 1.0;
+        vert.y = (target.y + target.height as i32) as f32;
+        vert.col = Color::from_tex_uv(br.0, br.1, tex_i, alpha);
         self.state.verts.push(vert);
         self.state.verts.push(vert);
-        vert.x = x as f32;
-        vert.r = 0.0;
+        vert.x = target.x as f32;
+        vert.col = Color::from_tex_uv(bl.0, bl.1, tex_i, alpha);
         self.state.verts.push(vert);
-        vert.y = y as f32;
-        vert.g = 0.0;
+        vert.y = target.y as f32;
+        vert.col = Color::from_tex_uv(tl.0, tl.1, tex_i, alpha);
         self.state.verts.push(vert);
     }
 
-    fn render_rect(&mut self, color: Color, rect: pixman::Rectangle32) {
+    fn render_rect(&mut self, col: Color, rect: pixman::Rectangle32) {
         let mut vert = Vert {
             x: rect.x as f32,
             y: rect.y as f32,
-            r: color.r,
-            g: color.g,
-            b: color.b,
-            a: color.a,
+            col,
         };
         self.state.verts.push(vert);
         vert.x = (rect.x + rect.width as i32) as f32;
@@ -501,10 +553,7 @@ impl Frame for FrameImp<'_> {
 struct Vert {
     x: f32,
     y: f32,
-    r: f32,
-    g: f32,
-    b: f32,
-    a: f32,
+    col: Color,
 }
 
 pub struct Framebuffer {

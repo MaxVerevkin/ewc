@@ -17,6 +17,8 @@ struct Texture {
     buffer_id: BufferId,
     hx: i32,
     hy: i32,
+    w: u32,
+    h: u32,
 }
 
 enum Kind {
@@ -69,15 +71,18 @@ impl Cursor {
         }
     }
 
-    pub fn get_buffer(&self) -> Option<(BufferId, i32, i32)> {
+    pub fn get_buffer(&self) -> Option<(BufferId, i32, i32, u32, u32)> {
         match &self.kind {
             Kind::Hidden => None,
-            Kind::Surface { surface, hx, hy } => surface
-                .cur
-                .borrow()
-                .buffer
-                .map(|(buf, _, _)| (buf, *hx, *hy)),
-            Kind::Texture(tex) => Some((tex.buffer_id, tex.hx, tex.hy)),
+            Kind::Surface { surface, hx, hy } => {
+                let (w, h) = surface.effective_buffer_size()?;
+                surface
+                    .cur
+                    .borrow()
+                    .buffer
+                    .map(|(buf, _, _)| (buf, *hx, *hy, w, h))
+            }
+            Kind::Texture(tex) => Some((tex.buffer_id, tex.hx, tex.hy, tex.w, tex.h)),
         }
     }
 
@@ -110,6 +115,8 @@ fn get_texture(
         ),
         hx: image.xhot as i32,
         hy: image.yhot as i32,
+        w: image.width,
+        h: image.height,
     })
 }
 

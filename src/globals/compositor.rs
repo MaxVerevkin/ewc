@@ -54,6 +54,7 @@ pub struct SurfaceState {
     pub mask: CommitedMask,
 
     pub buffer: Option<(BufferId, u32, u32)>,
+    pub transform: Option<wl_output::Transform>,
     pub opaque_region: Option<pixman::Region32>,
     pub input_region: Option<pixman::Region32>,
     pub subsurfaces: Vec<SubsurfaceNode>,
@@ -85,6 +86,9 @@ impl SurfaceState {
             dst.frame_cbs.extend_from_slice(&self.frame_cbs);
             self.frame_cbs.clear();
         }
+        if self.mask.contains(CommittedMaskBit::Transform) {
+            dst.transform = self.transform.take();
+        }
         self.mask.clear();
     }
 }
@@ -97,6 +101,7 @@ pub enum CommittedMaskBit {
     InputRegion = 1 << 2,
     Subsurfaces = 1 << 3,
     FrameCb = 1 << 4,
+    Transform = 1 << 5,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -137,16 +142,30 @@ impl Surface {
         }
     }
 
-    pub fn get_bounding_box(&self) -> Option<pixman::Box32> {
+    pub fn effective_buffer_size(&self) -> Option<(u32, u32)> {
         let cur = self.cur.borrow();
-        let (_buf, w, h) = cur.buffer?;
+        let (_id, w, h) = cur.buffer?;
+
+        use wl_output::Transform;
+        Some(match cur.transform.unwrap_or(Transform::Normal) {
+            Transform::Normal | Transform::_180 | Transform::Flipped | Transform::Flipped180 => {
+                (w, h)
+            }
+            Transform::_90 | Transform::_270 | Transform::Flipped90 | Transform::Flipped270 => {
+                (h, w)
+            }
+        })
+    }
+
+    pub fn get_bounding_box(&self) -> Option<pixman::Box32> {
+        let (w, h) = self.effective_buffer_size()?;
         let mut bbox = pixman::Box32 {
             x1: 0,
             y1: 0,
             x2: w as i32,
             y2: h as i32,
         };
-        for sub in &cur.subsurfaces {
+        for sub in &self.cur.borrow().subsurfaces {
             if let Some(sub_box) = sub.surface.get_bounding_box() {
                 bbox.x1 = bbox.x1.min(sub.position.0 + sub_box.x1);
                 bbox.x2 = bbox.x2.max(sub.position.0 + sub_box.x2);
@@ -418,7 +437,11 @@ fn wl_surface_cb(ctx: RequestCtx<WlSurface>) -> io::Result<()> {
                 }
             }
         }
-        Request::SetBufferTransform(_) => todo!(),
+        Request::SetBufferTransform(transform) => {
+            let mut pending = surface.pending.borrow_mut();
+            pending.transform = Some(transform);
+            pending.mask.set(CommittedMaskBit::Transform);
+        }
         Request::SetBufferScale(scale) => {
             assert_eq!(scale, 1, "unimplemented");
         }

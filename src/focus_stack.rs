@@ -30,7 +30,7 @@ impl FocusStack {
                     return Some(res);
                 }
             }
-            let (_, w, h) = surf.cur.borrow().buffer?;
+            let (w, h) = surf.effective_buffer_size()?;
             let ok = x >= 0.0
                 && y >= 0.0
                 && x < w as f32

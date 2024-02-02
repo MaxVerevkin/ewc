@@ -159,12 +159,22 @@ fn render_surface(frame: &mut dyn Frame, surf: &Surface, alpha: f32, x: i32, y: 
         frame_cb.done(frame.time());
     }
     let Some((buf_id, _, _)) = surf.cur.borrow().buffer else { return };
-    frame.render_buffer(
-        buf_id,
-        surf.cur.borrow().opaque_region.as_ref(),
-        alpha,
+    let Some((w, h)) = surf.effective_buffer_size() else { return };
+    let target = pixman::Rectangle32 {
         x,
         y,
+        width: w,
+        height: h,
+    };
+    frame.render_buffer(
+        buf_id,
+        surf.cur
+            .borrow()
+            .transform
+            .unwrap_or(wl_output::Transform::Normal),
+        surf.cur.borrow().opaque_region.as_ref(),
+        alpha,
+        target,
     );
     for sub in &surf.cur.borrow().subsurfaces.clone() {
         let position = sub.position;
@@ -322,13 +332,18 @@ impl Server {
                                 );
                             }
                         }
-                        if let Some((buf_id, hx, hy)) = self.state.cursor.get_buffer() {
+                        if let Some((buf_id, hx, hy, w, h)) = self.state.cursor.get_buffer() {
                             frame.render_buffer(
                                 buf_id,
+                                wl_output::Transform::Normal, // TODO: support transform on cursors
                                 None,
                                 1.0,
-                                self.state.seat.pointer.x.round() as i32 - hx,
-                                self.state.seat.pointer.y.round() as i32 - hy,
+                                pixman::Rectangle32 {
+                                    x: self.state.seat.pointer.x.round() as i32 - hx,
+                                    y: self.state.seat.pointer.y.round() as i32 - hy,
+                                    width: w,
+                                    height: h,
+                                },
                             );
                         }
                     });
