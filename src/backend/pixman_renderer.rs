@@ -220,10 +220,11 @@ impl Frame for FrameImp<'_> {
     fn render_buffer(
         &mut self,
         buf: BufferId,
-        transform: protocol::wl_output::Transform,
         opaque_region: Option<&pixman::Region32>,
         alpha: f32,
-        target: pixman::Rectangle32,
+        transform: BufferTransform,
+        x: i32,
+        y: i32,
     ) {
         let buf = &self.state.buffers[&buf];
         let (bytes, tex_width, tex_height, stride, format) = match &buf.kind {
@@ -251,33 +252,9 @@ impl Frame for FrameImp<'_> {
             .unwrap()
         };
 
-        let uv_mat = {
-            use pixman::Transform as Mat;
-            let mut mat = Mat::identity();
-            if transform as u32 & 4 != 0 {
-                mat = mat
-                    .scale(-1.0, 1.0, false)
-                    .unwrap()
-                    .translate(tex_width as f32, 0.0, false)
-                    .unwrap();
-            }
-            if transform as u32 & 1 != 0 {
-                mat = mat
-                    .rotate(0.0, -1.0, false)
-                    .unwrap()
-                    .translate(0.0, tex_height as f32, false)
-                    .unwrap();
-            }
-            if transform as u32 & 2 != 0 {
-                mat = mat
-                    .rotate(-1.0, 0.0, false)
-                    .unwrap()
-                    .translate(tex_width as f32, tex_height as f32, false)
-                    .unwrap();
-            }
-            mat
-        };
-        src.set_transform(uv_mat).unwrap();
+        let uv_mat = transform.surface_to_buffer(tex_width, tex_height).unwrap();
+        src.set_transform(pixman::Transform::try_from(uv_mat).unwrap())
+            .unwrap();
 
         let buf_rect = pixman::Box32 {
             x1: 0,
@@ -303,8 +280,8 @@ impl Frame for FrameImp<'_> {
             mask.as_deref(),
             (0, 0),
             (0, 0),
-            (target.x, target.y),
-            (target.width as i32, target.height as i32),
+            (x, y),
+            (transform.dst_width as i32, transform.dst_height as i32),
         );
     }
 

@@ -9,6 +9,7 @@ mod gl46_renderer;
 mod pixman_renderer;
 pub mod wayland;
 
+use crate::globals::compositor::BufferTransform;
 use crate::globals::linux_dmabuf::DmaBufSpec;
 use crate::globals::shm::{ShmBufferSpec, ShmPool};
 use crate::protocol;
@@ -54,10 +55,11 @@ pub trait Frame {
     fn render_buffer(
         &mut self,
         buf: BufferId,
-        transform: protocol::wl_output::Transform,
         opaque_region: Option<&pixman::Region32>,
         alpha: f32,
-        target: pixman::Rectangle32,
+        transform: BufferTransform,
+        x: i32,
+        y: i32,
     );
     fn render_rect(&mut self, color: Color, rect: pixman::Rectangle32);
 }

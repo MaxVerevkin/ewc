@@ -28,7 +28,7 @@ use crate::client::{Client, ClientId};
 use crate::cursor::Cursor;
 use crate::event_loop::EventLoop;
 use crate::focus_stack::FocusStack;
-use crate::globals::compositor::{Compositor, Surface};
+use crate::globals::compositor::{BufferTransform, Compositor, Surface};
 use crate::globals::ewc_debug::Debugger;
 use crate::globals::linux_dmabuf::LinuxDmabuf;
 use crate::globals::GlobalsManager;
@@ -159,22 +159,13 @@ fn render_surface(frame: &mut dyn Frame, surf: &Surface, alpha: f32, x: i32, y: 
         frame_cb.done(frame.time());
     }
     let Some((buf_id, _, _)) = surf.cur.borrow().buffer else { return };
-    let Some((w, h)) = surf.effective_buffer_size() else { return };
-    let target = pixman::Rectangle32 {
-        x,
-        y,
-        width: w,
-        height: h,
-    };
     frame.render_buffer(
         buf_id,
-        surf.cur
-            .borrow()
-            .transform
-            .unwrap_or(wl_output::Transform::Normal),
         surf.cur.borrow().opaque_region.as_ref(),
         alpha,
-        target,
+        surf.buffer_transform().unwrap(),
+        x,
+        y,
     );
     for sub in &surf.cur.borrow().subsurfaces.clone() {
         let position = sub.position;
@@ -335,15 +326,21 @@ impl Server {
                         if let Some((buf_id, hx, hy, w, h)) = self.state.cursor.get_buffer() {
                             frame.render_buffer(
                                 buf_id,
-                                wl_output::Transform::Normal, // TODO: support transform on cursors
                                 None,
                                 1.0,
-                                pixman::Rectangle32 {
-                                    x: self.state.seat.pointer.x.round() as i32 - hx,
-                                    y: self.state.seat.pointer.y.round() as i32 - hy,
-                                    width: w,
-                                    height: h,
+                                // TODO: support transform on cursors
+                                BufferTransform {
+                                    transform: wl_output::Transform::Normal,
+                                    scale: 1,
+                                    src_x: 0.0,
+                                    src_y: 0.0,
+                                    src_width: w as f64,
+                                    src_height: h as f64,
+                                    dst_width: w,
+                                    dst_height: h,
                                 },
+                                self.state.seat.pointer.x.round() as i32 - hx,
+                                self.state.seat.pointer.y.round() as i32 - hy,
                             );
                         }
                     });

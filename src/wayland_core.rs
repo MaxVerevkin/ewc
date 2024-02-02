@@ -110,8 +110,14 @@ impl ArgValue {
 }
 
 /// Signed 24.8 decimal number
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Fixed(pub i32);
+
+impl Fixed {
+    pub const ZERO: Self = Self(0);
+    pub const ONE: Self = Self(256);
+    pub const MINUS_ONE: Self = Self(-256);
+}
 
 impl From<i32> for Fixed {
     fn from(value: i32) -> Self {

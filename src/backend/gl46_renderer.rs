@@ -434,97 +434,69 @@ impl Frame for FrameImp<'_> {
     fn render_buffer(
         &mut self,
         buf: BufferId,
-        transform: wl_output::Transform,
         _opaque_region: Option<&pixman::Region32>,
         alpha: f32,
-        target: pixman::Rectangle32,
+        transform: BufferTransform,
+        x: i32,
+        y: i32,
     ) {
         if self.state.bound_textures == self.state.texture_units {
             self.state.flush_quads();
         }
 
-        let uv_mat = {
-            use pixman::Transform as Mat;
-            let mut mat = Mat::identity();
-            if transform as u32 & 4 != 0 {
-                mat = mat
-                    .scale(-1.0, 1.0, false)
-                    .unwrap()
-                    .translate(1.0, 0.0, false)
-                    .unwrap();
-            }
-            if transform as u32 & 1 != 0 {
-                mat = mat
-                    .rotate(0.0, -1.0, false)
-                    .unwrap()
-                    .translate(0.0, 1.0, false)
-                    .unwrap();
-            }
-            if transform as u32 & 2 != 0 {
-                mat = mat
-                    .rotate(-1.0, 0.0, false)
-                    .unwrap()
-                    .translate(1.0, 1.0, false)
-                    .unwrap();
-            }
-            mat
-        };
+        let tex = &self.state.textures[&buf];
+        let uv_mat = transform.surface_to_uv(tex.width, tex.height).unwrap();
 
         let tl = uv_mat
-            .transform_point(pixman::Vector::new([0, 0, 1]))
+            .transform_point(pixman::FVector::new([0.0, 0.0, 1.0]))
             .unwrap();
         let tr = uv_mat
-            .transform_point(pixman::Vector::new([1, 0, 1]))
+            .transform_point(pixman::FVector::new([transform.dst_width as f64, 0.0, 1.0]))
             .unwrap();
         let bl = uv_mat
-            .transform_point(pixman::Vector::new([0, 1, 1]))
+            .transform_point(pixman::FVector::new([
+                0.0,
+                transform.dst_height as f64,
+                1.0,
+            ]))
             .unwrap();
         let br = uv_mat
-            .transform_point(pixman::Vector::new([1, 1, 1]))
+            .transform_point(pixman::FVector::new([
+                transform.dst_width as f64,
+                transform.dst_height as f64,
+                1.0,
+            ]))
             .unwrap();
 
-        let tl = (
-            (tl.x().into_raw() as f64 / 65536.0) as f32,
-            (tl.y().into_raw() as f64 / 65536.0) as f32,
-        );
-        let tr = (
-            (tr.x().into_raw() as f64 / 65536.0) as f32,
-            (tr.y().into_raw() as f64 / 65536.0) as f32,
-        );
-        let bl = (
-            (bl.x().into_raw() as f64 / 65536.0) as f32,
-            (bl.y().into_raw() as f64 / 65536.0) as f32,
-        );
-        let br = (
-            (br.x().into_raw() as f64 / 65536.0) as f32,
-            (br.y().into_raw() as f64 / 65536.0) as f32,
-        );
+        let tl = (tl.x() as f32, tl.y() as f32);
+        let tr = (tr.x() as f32, tr.y() as f32);
+        let bl = (bl.x() as f32, bl.y() as f32);
+        let br = (br.x() as f32, br.y() as f32);
 
         unsafe {
-            let tex = &self.state.textures[&buf];
             self.state
                 .gl
                 .BindTextureUnit(self.state.bound_textures, tex.gl_name);
         }
         let tex_i = self.state.bound_textures;
         let mut vert = Vert {
-            x: target.x as f32,
-            y: target.y as f32,
+            x: x as f32,
+            y: y as f32,
             col: Color::from_tex_uv(tl.0, tl.1, tex_i, alpha),
         };
         self.state.bound_textures += 1;
         self.state.verts.push(vert);
-        vert.x = (target.x + target.width as i32) as f32;
+        vert.x = (x + transform.dst_width as i32) as f32;
         vert.col = Color::from_tex_uv(tr.0, tr.1, tex_i, alpha);
         self.state.verts.push(vert);
-        vert.y = (target.y + target.height as i32) as f32;
+        vert.y = (y + transform.dst_height as i32) as f32;
         vert.col = Color::from_tex_uv(br.0, br.1, tex_i, alpha);
         self.state.verts.push(vert);
         self.state.verts.push(vert);
-        vert.x = target.x as f32;
+        vert.x = x as f32;
         vert.col = Color::from_tex_uv(bl.0, bl.1, tex_i, alpha);
         self.state.verts.push(vert);
-        vert.y = target.y as f32;
+        vert.y = y as f32;
         vert.col = Color::from_tex_uv(tl.0, tl.1, tex_i, alpha);
         self.state.verts.push(vert);
     }

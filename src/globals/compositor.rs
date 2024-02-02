@@ -7,8 +7,8 @@ use super::xdg_shell;
 use crate::backend::{Backend, BufferId};
 use crate::client::RequestCtx;
 use crate::globals::{GlobalsManager, IsGlobal};
-use crate::protocol::*;
 use crate::wayland_core::Proxy;
+use crate::{protocol::*, Fixed};
 use crate::{Client, State};
 
 #[derive(Default)]
@@ -18,6 +18,7 @@ pub struct Compositor {
     pub subsurfaces: HashMap<WlSubsurface, Rc<SubsurfaceRole>>,
     pub xdg_surfaces: HashMap<XdgSurface, Rc<xdg_shell::XdgSurfaceRole>>,
     pub xdg_toplevels: HashMap<XdgToplevel, Rc<xdg_shell::XdgToplevelRole>>,
+    pub viewporters: HashMap<WpViewport, Weak<Surface>>,
 }
 
 impl Compositor {
@@ -25,6 +26,7 @@ impl Compositor {
         globals.add_global::<WlCompositor>(6);
         globals.add_global::<WlSubcompositor>(1);
         globals.add_global::<XdgWmBase>(5);
+        globals.add_global::<WpViewporter>(1);
     }
 
     pub fn release_buffers(self, backend: &mut dyn Backend) {
@@ -47,6 +49,7 @@ pub struct Surface {
     pub cur: RefCell<SurfaceState>,
     pending: RefCell<SurfaceState>,
     pending_buffer: RefCell<Option<WlBuffer>>,
+    viewport: Cell<Option<WpViewport>>,
 }
 
 #[derive(Default, Clone)]
@@ -59,6 +62,9 @@ pub struct SurfaceState {
     pub input_region: Option<pixman::Region32>,
     pub subsurfaces: Vec<SubsurfaceNode>,
     pub frame_cbs: Vec<WlCallback>,
+
+    pub viewport_src: Option<(f64, f64, f64, f64)>,
+    pub viewport_dst: Option<(u32, u32)>,
 }
 
 impl SurfaceState {
@@ -89,6 +95,12 @@ impl SurfaceState {
         if self.mask.contains(CommittedMaskBit::Transform) {
             dst.transform = self.transform.take();
         }
+        if self.mask.contains(CommittedMaskBit::ViewportSrc) {
+            dst.viewport_src = self.viewport_src.take();
+        }
+        if self.mask.contains(CommittedMaskBit::ViewportDst) {
+            dst.viewport_dst = self.viewport_dst.take();
+        }
         self.mask.clear();
     }
 }
@@ -102,6 +114,8 @@ pub enum CommittedMaskBit {
     Subsurfaces = 1 << 3,
     FrameCb = 1 << 4,
     Transform = 1 << 5,
+    ViewportSrc = 1 << 6,
+    ViewportDst = 1 << 7,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -139,6 +153,7 @@ impl Surface {
             cur: RefCell::new(SurfaceState::default()),
             pending: RefCell::new(SurfaceState::default()),
             pending_buffer: RefCell::new(None),
+            viewport: Cell::new(None),
         }
     }
 
@@ -146,14 +161,40 @@ impl Surface {
         let cur = self.cur.borrow();
         let (_id, w, h) = cur.buffer?;
 
-        use wl_output::Transform;
-        Some(match cur.transform.unwrap_or(Transform::Normal) {
-            Transform::Normal | Transform::_180 | Transform::Flipped | Transform::Flipped180 => {
-                (w, h)
-            }
-            Transform::_90 | Transform::_270 | Transform::Flipped90 | Transform::Flipped270 => {
-                (h, w)
-            }
+        if let Some((w, h)) = cur.viewport_dst {
+            Some((w, h))
+        } else if let Some((_x, _y, w, h)) = cur.viewport_src {
+            Some((w.ceil() as u32, h.ceil() as u32))
+        } else {
+            use wl_output::Transform;
+            Some(match cur.transform.unwrap_or(Transform::Normal) {
+                Transform::Normal
+                | Transform::_180
+                | Transform::Flipped
+                | Transform::Flipped180 => (w, h),
+                Transform::_90 | Transform::_270 | Transform::Flipped90 | Transform::Flipped270 => {
+                    (h, w)
+                }
+            })
+        }
+    }
+
+    pub fn buffer_transform(&self) -> Option<BufferTransform> {
+        let (dst_width, dst_height) = self.effective_buffer_size()?;
+        let cur = self.cur.borrow();
+        let (src_x, src_y, src_width, src_height) = match cur.viewport_src {
+            None => (0.0, 0.0, dst_width as f64, dst_height as f64),
+            Some(src) => src,
+        };
+        Some(BufferTransform {
+            transform: cur.transform.unwrap_or(wl_output::Transform::Normal),
+            scale: 1,
+            src_x,
+            src_y,
+            src_width,
+            src_height,
+            dst_width,
+            dst_height,
         })
     }
 
@@ -325,6 +366,30 @@ impl IsGlobal for WlSubcompositor {
                         .borrow_mut()
                         .mask
                         .set(CommittedMaskBit::Subsurfaces);
+                }
+            }
+            Ok(())
+        });
+    }
+}
+
+impl IsGlobal for WpViewporter {
+    fn on_bind(&self, _client: &mut Client, _state: &mut State) {
+        self.set_callback(|ctx| {
+            use wp_viewporter::Request;
+            match ctx.request {
+                Request::Destroy => (),
+                Request::GetViewport(args) => {
+                    args.id.set_callback(wp_viewport_cb);
+                    let surf = ctx.client.compositor.surfaces.get(&args.surface).unwrap();
+                    if surf.viewport.take().is_some() {
+                        return Err(io::Error::other("surface already has a viewport"));
+                    }
+                    surf.viewport.set(Some(args.id.clone()));
+                    ctx.client
+                        .compositor
+                        .viewporters
+                        .insert(args.id, Rc::downgrade(surf));
                 }
             }
             Ok(())
@@ -539,4 +604,110 @@ fn wl_region_cb(ctx: RequestCtx<WlRegion>) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+fn wp_viewport_cb(ctx: RequestCtx<WpViewport>) -> io::Result<()> {
+    let surf = ctx
+        .client
+        .compositor
+        .viewporters
+        .get(&ctx.proxy)
+        .unwrap()
+        .upgrade()
+        .ok_or_else(|| io::Error::other("viweport: surface is dead"))?;
+    let mut pending = surf.pending.borrow_mut();
+
+    use wp_viewport::Request;
+    match ctx.request {
+        Request::Destroy => {
+            pending.viewport_src = None;
+            pending.viewport_dst = None;
+            surf.viewport.set(None);
+            ctx.client.compositor.viewporters.remove(&ctx.proxy);
+        }
+        Request::SetSource(args) => {
+            dbg!(&args);
+            pending.mask.set(CommittedMaskBit::ViewportSrc);
+            if args.x == Fixed::MINUS_ONE
+                && args.y == Fixed::MINUS_ONE
+                && args.width == Fixed::MINUS_ONE
+                && args.height == Fixed::MINUS_ONE
+            {
+                pending.viewport_src = None;
+            } else if args.x >= Fixed::ZERO
+                && args.y >= Fixed::ZERO
+                && args.width > Fixed::ZERO
+                && args.height > Fixed::ZERO
+            {
+                pending.viewport_src = Some((
+                    args.x.as_f64(),
+                    args.y.as_f64(),
+                    args.width.as_f64(),
+                    args.height.as_f64(),
+                ));
+            } else {
+                return Err(io::Error::other("invalid viewport src"));
+            }
+        }
+        Request::SetDestination(args) => {
+            dbg!(&args);
+            if args.width == -1 && args.height == -1 {
+                pending.mask.set(CommittedMaskBit::ViewportDst);
+                pending.viewport_dst = None;
+            } else if args.width > 0 && args.height > 0 {
+                pending.mask.set(CommittedMaskBit::ViewportDst);
+                pending.viewport_dst = Some((args.width as u32, args.height as u32));
+            } else {
+                return Err(io::Error::other("invalid viewport dst"));
+            }
+        }
+    }
+    Ok(())
+}
+
+pub struct BufferTransform {
+    pub transform: wl_output::Transform,
+    pub scale: u32,
+    pub src_x: f64,
+    pub src_y: f64,
+    pub src_width: f64,
+    pub src_height: f64,
+    pub dst_width: u32,
+    pub dst_height: u32,
+}
+
+impl BufferTransform {
+    pub fn surface_to_buffer(&self, buf_width: u32, buf_height: u32) -> Option<pixman::FTransform> {
+        let mut mat = pixman::FTransform::identity()
+            .scale(
+                self.src_width / self.dst_width as f64,
+                self.src_height / self.dst_height as f64,
+                false,
+            )?
+            .translate(self.src_x, self.src_y, false)?
+            .scale(self.scale as f64, self.scale as f64, false)?;
+        if self.transform as u32 & 4 != 0 {
+            mat = mat
+                .scale(-1.0, 1.0, false)?
+                .translate(buf_width as f64, 0.0, false)?;
+        }
+        if self.transform as u32 & 1 != 0 {
+            mat = mat
+                .rotate(0.0, -1.0, false)?
+                .translate(0.0, buf_height as f64, false)?;
+        }
+        if self.transform as u32 & 2 != 0 {
+            mat = mat.rotate(-1.0, 0.0, false)?.translate(
+                buf_width as f64,
+                buf_height as f64,
+                false,
+            )?;
+        }
+        Some(mat)
+    }
+
+    pub fn surface_to_uv(&self, buf_width: u32, buf_height: u32) -> Option<pixman::FTransform> {
+        self.surface_to_buffer(buf_width, buf_height)
+            .and_then(|m| m.scale(1.0 / buf_width as f64, 1.0 / buf_height as f64, false))
+    }
 }
