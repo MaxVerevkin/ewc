@@ -11,6 +11,7 @@ use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use globals::single_pixel_buffer::SinglePixelBufferManager;
 use xkbcommon::xkb;
 
 mod backend;
@@ -124,6 +125,7 @@ impl Server {
         let mut globals = GlobalsManager::default();
         Compositor::register_globals(&mut globals);
         Seat::register_globals(&mut globals);
+        SinglePixelBufferManager::register_global(&mut globals);
         globals::cursor_shape::register_global(&mut globals);
         globals.add_global::<WlShm>(1);
         globals.add_global::<WlOutput>(2);

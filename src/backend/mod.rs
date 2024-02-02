@@ -33,9 +33,9 @@ pub trait RendererState: Any {
     fn create_argb8_texture(&mut self, width: u32, height: u32, bytes: &[u8]) -> BufferId;
     fn create_shm_buffer(&mut self, spec: ShmBufferSpec, resource: protocol::WlBuffer);
     fn create_dma_buffer(&mut self, spec: DmaBufSpec, resource: protocol::WlBuffer);
+    fn create_single_pix_buffer(&mut self, color: Color, resource: protocol::WlBuffer);
     fn buffer_commited(&mut self, buffer_resource: protocol::WlBuffer) -> BufferId;
     fn get_buffer_size(&self, buffer_id: BufferId) -> (u32, u32);
-    fn buffer_lock(&mut self, buffer_id: BufferId);
     fn buffer_unlock(&mut self, buffer_id: BufferId);
     fn buffer_resource_destroyed(&mut self, resource: protocol::WlBuffer);
 }
@@ -75,6 +75,15 @@ pub struct Color {
 impl Color {
     pub fn from_rgba(r: f32, g: f32, b: f32, a: f32) -> Self {
         Self { r, g, b, a }
+    }
+
+    pub fn from_rgba32(r: u32, g: u32, b: u32, a: u32) -> Self {
+        Self {
+            r: (r as f64 / u32::MAX as f64) as f32,
+            g: (g as f64 / u32::MAX as f64) as f32,
+            b: (b as f64 / u32::MAX as f64) as f32,
+            a: (a as f64 / u32::MAX as f64) as f32,
+        }
     }
 
     pub fn from_tex_uv(u: f32, v: f32, tex_i: u32, a: f32) -> Self {

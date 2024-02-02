@@ -9,6 +9,7 @@ use std::rc::Rc;
 use crate::globals::compositor::Compositor;
 use crate::globals::linux_dmabuf::LinuxDmabuf;
 use crate::globals::shm::Shm;
+use crate::globals::single_pixel_buffer::SinglePixelBufferManager;
 use crate::protocol::*;
 use crate::seat::{ClientSeat, DataSource};
 use crate::wayland_core::*;
@@ -145,6 +146,7 @@ pub struct Client {
     pub shm: Shm,
     pub data_sources: HashMap<WlDataSource, DataSource>,
     pub linux_dambuf: LinuxDmabuf,
+    pub single_pixel_buffer_manager: SinglePixelBufferManager,
 }
 
 impl Client {
@@ -157,6 +159,7 @@ impl Client {
             shm: Shm::default(),
             data_sources: HashMap::new(),
             linux_dambuf: LinuxDmabuf::default(),
+            single_pixel_buffer_manager: SinglePixelBufferManager::default(),
         }
     }
 

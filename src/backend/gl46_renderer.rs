@@ -16,7 +16,7 @@ const DRM_FORMAT_XRGB8888: Fourcc = Fourcc(u32::from_le_bytes(*b"XR24"));
 pub struct RendererStateImp {
     shm_pools: HashMap<WlShmPool, ShmPool>,
     shm_buffers: HashMap<WlBuffer, ShmBufferSpec>,
-    dma_buffers: HashMap<WlBuffer, BufferId>,
+    tex_buffers: HashMap<WlBuffer, BufferId>,
     textures: HashMap<BufferId, Texture>,
     next_id: NonZeroU64,
 
@@ -36,10 +36,19 @@ pub struct RendererStateImp {
 }
 
 struct Texture {
+    locks: u32,
+    kind: TextureKind,
+}
+
+enum TextureKind {
+    Gl(GlTexture),
+    SinglePix(Color),
+}
+
+struct GlTexture {
     gl_name: u32,
     width: u32,
     height: u32,
-    locks: u32,
     resource: Option<WlBuffer>,
 }
 
@@ -129,7 +138,7 @@ impl RendererStateImp {
         Some(Self {
             shm_pools: HashMap::new(),
             shm_buffers: HashMap::new(),
-            dma_buffers: HashMap::new(),
+            tex_buffers: HashMap::new(),
             textures: HashMap::new(),
             next_id: NonZeroU64::MIN,
 
@@ -215,14 +224,19 @@ impl RendererStateImp {
     fn consider_dropping_buffer(&mut self, buffer_id: BufferId) {
         let buffer = self.textures.get(&buffer_id).unwrap();
         assert_eq!(buffer.locks, 0);
-        if let Some(resource) = &buffer.resource {
-            if resource.is_alive() {
-                resource.release();
-                return;
+        match &buffer.kind {
+            TextureKind::Gl(buffer) => {
+                if let Some(resource) = &buffer.resource {
+                    if resource.is_alive() {
+                        resource.release();
+                        return;
+                    }
+                }
+                unsafe { self.gl.DeleteTextures(1, &buffer.gl_name) };
             }
+            TextureKind::SinglePix(_) => (),
         }
-        let buffer = self.textures.remove(&buffer_id).unwrap();
-        unsafe { self.gl.DeleteTextures(1, &buffer.gl_name) };
+        self.textures.remove(&buffer_id);
     }
 }
 
@@ -254,11 +268,13 @@ impl RendererState for RendererStateImp {
         self.textures.insert(
             new_id,
             Texture {
-                gl_name,
-                width,
-                height,
                 locks: 1,
-                resource: None,
+                kind: TextureKind::Gl(GlTexture {
+                    gl_name,
+                    width,
+                    height,
+                    resource: None,
+                }),
             },
         );
         new_id
@@ -323,20 +339,39 @@ impl RendererState for RendererStateImp {
         self.textures.insert(
             new_id,
             Texture {
-                gl_name,
-                width: spec.width,
-                height: spec.height,
                 locks: 0,
-                resource: Some(resource.clone()),
+                kind: TextureKind::Gl(GlTexture {
+                    gl_name,
+                    width: spec.width,
+                    height: spec.height,
+                    resource: Some(resource.clone()),
+                }),
             },
         );
-        self.dma_buffers.insert(resource, new_id);
+        self.tex_buffers.insert(resource, new_id);
+    }
+
+    fn create_single_pix_buffer(&mut self, color: Color, resource: protocol::WlBuffer) {
+        let new_id = BufferId(next_id(&mut self.next_id));
+        self.textures.insert(
+            new_id,
+            Texture {
+                locks: 0,
+                kind: TextureKind::SinglePix(color),
+            },
+        );
+        self.tex_buffers.insert(resource, new_id);
     }
 
     fn buffer_commited(&mut self, buffer_resource: WlBuffer) -> BufferId {
-        if let Some(&dma) = self.dma_buffers.get(&buffer_resource) {
-            self.buffer_lock(dma);
-            return dma;
+        if let Some(&tex_id) = self.tex_buffers.get(&buffer_resource) {
+            let tex = self.textures.get_mut(&tex_id).unwrap();
+            tex.locks += 1;
+            match &tex.kind {
+                TextureKind::Gl(_) => (),
+                TextureKind::SinglePix(_) => buffer_resource.release(),
+            }
+            return tex_id;
         }
 
         let spec = self.shm_buffers.get(&buffer_resource).unwrap();
@@ -360,24 +395,23 @@ impl RendererState for RendererStateImp {
         self.textures.insert(
             new_id,
             Texture {
-                gl_name,
-                width: spec.width,
-                height: spec.height,
                 locks: 1,
-                resource: None,
+                kind: TextureKind::Gl(GlTexture {
+                    gl_name,
+                    width: spec.width,
+                    height: spec.height,
+                    resource: None,
+                }),
             },
         );
         new_id
     }
 
     fn get_buffer_size(&self, buffer_id: BufferId) -> (u32, u32) {
-        let buf = &self.textures[&buffer_id];
-        (buf.width, buf.height)
-    }
-
-    fn buffer_lock(&mut self, buffer_id: BufferId) {
-        let buf = self.textures.get_mut(&buffer_id).unwrap();
-        buf.locks += 1;
+        match &self.textures[&buffer_id].kind {
+            TextureKind::Gl(gl) => (gl.width, gl.height),
+            TextureKind::SinglePix(_) => (1, 1),
+        }
     }
 
     fn buffer_unlock(&mut self, buffer_id: BufferId) {
@@ -389,9 +423,11 @@ impl RendererState for RendererStateImp {
     }
 
     fn buffer_resource_destroyed(&mut self, resource: WlBuffer) {
-        if let Some(dma) = self.dma_buffers.remove(&resource) {
-            self.textures.get_mut(&dma).unwrap().resource = None;
-            self.consider_dropping_buffer(dma);
+        if let Some(tex) = self.tex_buffers.remove(&resource) {
+            if let TextureKind::Gl(gl) = &mut self.textures.get_mut(&tex).unwrap().kind {
+                gl.resource = None;
+            }
+            self.consider_dropping_buffer(tex);
             return;
         }
 
@@ -443,67 +479,88 @@ impl Frame for FrameImp<'_> {
             self.state.flush_quads();
         }
 
-        let tex = &self.state.textures[&buf_transform.buf_id];
-        assert_eq!(tex.width, buf_transform.buf_width);
-        assert_eq!(tex.height, buf_transform.buf_height);
-        let uv_mat = buf_transform.surface_to_uv().unwrap();
+        match &self.state.textures[&buf_transform.buf_id].kind {
+            TextureKind::Gl(tex) => {
+                assert_eq!(tex.width, buf_transform.buf_width);
+                assert_eq!(tex.height, buf_transform.buf_height);
+                let uv_mat = buf_transform.surface_to_uv().unwrap();
 
-        let tl = uv_mat
-            .transform_point(pixman::FVector::new([0.0, 0.0, 1.0]))
-            .unwrap();
-        let tr = uv_mat
-            .transform_point(pixman::FVector::new([
-                buf_transform.dst_width as f64,
-                0.0,
-                1.0,
-            ]))
-            .unwrap();
-        let bl = uv_mat
-            .transform_point(pixman::FVector::new([
-                0.0,
-                buf_transform.dst_height as f64,
-                1.0,
-            ]))
-            .unwrap();
-        let br = uv_mat
-            .transform_point(pixman::FVector::new([
-                buf_transform.dst_width as f64,
-                buf_transform.dst_height as f64,
-                1.0,
-            ]))
-            .unwrap();
+                let tl = uv_mat
+                    .transform_point(pixman::FVector::new([0.0, 0.0, 1.0]))
+                    .unwrap();
+                let tr = uv_mat
+                    .transform_point(pixman::FVector::new([
+                        buf_transform.dst_width as f64,
+                        0.0,
+                        1.0,
+                    ]))
+                    .unwrap();
+                let bl = uv_mat
+                    .transform_point(pixman::FVector::new([
+                        0.0,
+                        buf_transform.dst_height as f64,
+                        1.0,
+                    ]))
+                    .unwrap();
+                let br = uv_mat
+                    .transform_point(pixman::FVector::new([
+                        buf_transform.dst_width as f64,
+                        buf_transform.dst_height as f64,
+                        1.0,
+                    ]))
+                    .unwrap();
 
-        let tl = (tl.x() as f32, tl.y() as f32);
-        let tr = (tr.x() as f32, tr.y() as f32);
-        let bl = (bl.x() as f32, bl.y() as f32);
-        let br = (br.x() as f32, br.y() as f32);
+                let tl = (tl.x() as f32, tl.y() as f32);
+                let tr = (tr.x() as f32, tr.y() as f32);
+                let bl = (bl.x() as f32, bl.y() as f32);
+                let br = (br.x() as f32, br.y() as f32);
 
-        unsafe {
-            self.state
-                .gl
-                .BindTextureUnit(self.state.bound_textures, tex.gl_name);
+                unsafe {
+                    self.state
+                        .gl
+                        .BindTextureUnit(self.state.bound_textures, tex.gl_name);
+                }
+                let tex_i = self.state.bound_textures;
+                let mut vert = Vert {
+                    x: x as f32,
+                    y: y as f32,
+                    col: Color::from_tex_uv(tl.0, tl.1, tex_i, alpha),
+                };
+                self.state.bound_textures += 1;
+                self.state.verts.push(vert);
+                vert.x = (x + buf_transform.dst_width as i32) as f32;
+                vert.col = Color::from_tex_uv(tr.0, tr.1, tex_i, alpha);
+                self.state.verts.push(vert);
+                vert.y = (y + buf_transform.dst_height as i32) as f32;
+                vert.col = Color::from_tex_uv(br.0, br.1, tex_i, alpha);
+                self.state.verts.push(vert);
+                self.state.verts.push(vert);
+                vert.x = x as f32;
+                vert.col = Color::from_tex_uv(bl.0, bl.1, tex_i, alpha);
+                self.state.verts.push(vert);
+                vert.y = y as f32;
+                vert.col = Color::from_tex_uv(tl.0, tl.1, tex_i, alpha);
+                self.state.verts.push(vert);
+            }
+            &TextureKind::SinglePix(col) => {
+                let mut vert = Vert {
+                    x: x as f32,
+                    y: y as f32,
+                    col,
+                };
+                self.state.bound_textures += 1;
+                self.state.verts.push(vert);
+                vert.x = (x + buf_transform.dst_width as i32) as f32;
+                self.state.verts.push(vert);
+                vert.y = (y + buf_transform.dst_height as i32) as f32;
+                self.state.verts.push(vert);
+                self.state.verts.push(vert);
+                vert.x = x as f32;
+                self.state.verts.push(vert);
+                vert.y = y as f32;
+                self.state.verts.push(vert);
+            }
         }
-        let tex_i = self.state.bound_textures;
-        let mut vert = Vert {
-            x: x as f32,
-            y: y as f32,
-            col: Color::from_tex_uv(tl.0, tl.1, tex_i, alpha),
-        };
-        self.state.bound_textures += 1;
-        self.state.verts.push(vert);
-        vert.x = (x + buf_transform.dst_width as i32) as f32;
-        vert.col = Color::from_tex_uv(tr.0, tr.1, tex_i, alpha);
-        self.state.verts.push(vert);
-        vert.y = (y + buf_transform.dst_height as i32) as f32;
-        vert.col = Color::from_tex_uv(br.0, br.1, tex_i, alpha);
-        self.state.verts.push(vert);
-        self.state.verts.push(vert);
-        vert.x = x as f32;
-        vert.col = Color::from_tex_uv(bl.0, bl.1, tex_i, alpha);
-        self.state.verts.push(vert);
-        vert.y = y as f32;
-        vert.col = Color::from_tex_uv(tl.0, tl.1, tex_i, alpha);
-        self.state.verts.push(vert);
     }
 
     fn render_rect(&mut self, col: Color, rect: pixman::Rectangle32) {

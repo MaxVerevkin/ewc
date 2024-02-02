@@ -25,7 +25,7 @@ Wayland compositor from scratch in Rust.
 - [ ] `xdg-shell.xml` (partial)
 - [x] `linux-dmabuf-v1.xml` (v3, when using GL renderer)
 - [x] `viewporter.xml`
-- [ ] `single-pixel-buffer-v1.xml`
+- [x] `single-pixel-buffer-v1.xml`
 - [ ] `fractional-scale-v1.xml`
 - [ ] `wlr-layer-shell-unstable-v1.xml`
 - [x] `cursor-shape-v1.xml`

@@ -14,6 +14,7 @@ pub mod cursor_shape;
 pub mod ewc_debug;
 pub mod linux_dmabuf;
 pub mod shm;
+pub mod single_pixel_buffer;
 pub mod xdg_shell;
 
 pub trait IsGlobal: Proxy + 'static {

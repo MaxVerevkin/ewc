@@ -21,6 +21,7 @@ struct Buffer {
 enum BufferKind {
     Shm(ShmBuffer),
     Argb8Texture(u32, u32, Vec<u8>),
+    SinglePix(Color, Option<WlBuffer>),
 }
 
 struct ShmBuffer {
@@ -78,6 +79,9 @@ impl RendererStateImp {
                 }
             }
             BufferKind::Argb8Texture(_, _, _) => (),
+            BufferKind::SinglePix(_, res) => {
+                assert!(res.is_none());
+            }
         }
     }
 }
@@ -128,9 +132,30 @@ impl RendererState for RendererStateImp {
         panic!("not supproted");
     }
 
+    fn create_single_pix_buffer(&mut self, color: Color, resource: protocol::WlBuffer) {
+        let id = BufferId(next_id(&mut self.next_id));
+        self.resource_mapping.insert(resource.clone(), id);
+        self.buffers.insert(
+            id,
+            Buffer {
+                locks: 0,
+                kind: BufferKind::SinglePix(color, Some(resource)),
+            },
+        );
+    }
+
     fn buffer_commited(&mut self, resource: WlBuffer) -> BufferId {
         let buffer_id = *self.resource_mapping.get(&resource).unwrap();
-        self.buffer_lock(buffer_id);
+        let buf = self.buffers.get_mut(&buffer_id).unwrap();
+        buf.locks += 1;
+        match &buf.kind {
+            BufferKind::Shm(_) => (),
+            BufferKind::Argb8Texture(_, _, _) => (),
+            BufferKind::SinglePix(_, res) => {
+                assert_eq!(res.as_ref().unwrap(), &resource);
+                resource.release();
+            }
+        }
         buffer_id
     }
 
@@ -139,12 +164,8 @@ impl RendererState for RendererStateImp {
         match &buf.kind {
             BufferKind::Shm(shm) => (shm.spec.width, shm.spec.height),
             BufferKind::Argb8Texture(w, h, _) => (*w, *h),
+            BufferKind::SinglePix(_, _) => (1, 1),
         }
-    }
-
-    fn buffer_lock(&mut self, buffer_id: BufferId) {
-        let buf = self.buffers.get_mut(&buffer_id).unwrap();
-        buf.locks += 1;
     }
 
     fn buffer_unlock(&mut self, buffer_id: BufferId) {
@@ -162,6 +183,11 @@ impl RendererState for RendererStateImp {
                 BufferKind::Argb8Texture(_, _, _) => {
                     self.buffers.remove(&buffer_id);
                 }
+                BufferKind::SinglePix(_, res) => {
+                    if res.is_none() {
+                        self.drop_buffer(buffer_id);
+                    }
+                }
             }
         }
     }
@@ -177,6 +203,12 @@ impl RendererState for RendererStateImp {
                 }
             }
             BufferKind::Argb8Texture(_, _, _) => unreachable!(),
+            BufferKind::SinglePix(_, res) => {
+                *res = None;
+                if buf.locks == 0 {
+                    self.drop_buffer(buffer_id);
+                }
+            }
         }
     }
 }
@@ -225,33 +257,52 @@ impl Frame for FrameImp<'_> {
         x: i32,
         y: i32,
     ) {
+        let t;
+        let t2;
+
         let buf = &self.state.buffers[&buf_transform.buf_id];
-        let (bytes, tex_width, tex_height, stride, format) = match &buf.kind {
+        let (src, tex_width, tex_height) = match &buf.kind {
             BufferKind::Shm(shm) => {
                 let spec = &shm.spec;
                 let pool = &self.state.shm_pools[&spec.pool];
                 let bytes = &pool.memmap[spec.offset as usize..]
                     [..spec.stride as usize * spec.height as usize];
-                (bytes, spec.width, spec.height, spec.stride, spec.wl_format)
+                t = unsafe {
+                    pixman::Image::from_raw_mut(
+                        wl_format_to_pixman(spec.wl_format).unwrap(),
+                        spec.width as usize,
+                        spec.height as usize,
+                        bytes.as_ptr().cast_mut().cast(),
+                        spec.stride as usize,
+                        false,
+                    )
+                    .unwrap()
+                };
+                (&*t, spec.width, spec.height)
             }
             BufferKind::Argb8Texture(w, h, bytes) => {
-                (bytes.as_slice(), *w, *h, *w * 4, wl_shm::Format::Argb8888)
+                t = unsafe {
+                    pixman::Image::from_raw_mut(
+                        wl_format_to_pixman(wl_shm::Format::Argb8888).unwrap(),
+                        *w as usize,
+                        *h as usize,
+                        bytes.as_ptr().cast_mut().cast(),
+                        (*w * 4) as usize,
+                        false,
+                    )
+                    .unwrap()
+                };
+                (&*t, *w, *h)
+            }
+            BufferKind::SinglePix(color, _) => {
+                t2 =
+                    pixman::Solid::new(pixman::Color::from_f32(color.r, color.g, color.b, color.a))
+                        .unwrap();
+                (&*t2, 1, 1)
             }
         };
         assert_eq!(tex_width, buf_transform.buf_width);
         assert_eq!(tex_height, buf_transform.buf_height);
-
-        let src = unsafe {
-            pixman::Image::from_raw_mut(
-                wl_format_to_pixman(format).unwrap(),
-                tex_width as usize,
-                tex_height as usize,
-                bytes.as_ptr().cast_mut().cast(),
-                stride as usize,
-                false,
-            )
-            .unwrap()
-        };
 
         let mat = buf_transform.surface_to_buffer().unwrap();
         src.set_transform(pixman::Transform::try_from(mat).unwrap())
@@ -277,7 +328,7 @@ impl Frame for FrameImp<'_> {
 
         self.image.composite32(
             op,
-            &src,
+            src,
             mask.as_deref(),
             (0, 0),
             (0, 0),
