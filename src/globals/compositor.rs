@@ -166,11 +166,26 @@ impl Surface {
 
     fn effective_buffer_size(&self) -> io::Result<Option<(u32, u32)>> {
         let cur = self.cur.borrow();
-        let Some((_id, w, h)) = cur.buffer else { return Ok(None) };
+        let Some((_id, buf_w, buf_h)) = cur.buffer else { return Ok(None) };
         let scale = cur.scale.unwrap_or(1);
 
-        if w % scale != 0 || h % scale != 0 {
+        if buf_w % scale != 0 || buf_h % scale != 0 {
             return Err(io::Error::other("buffer size not a multiple of scale"));
+        }
+
+        let (transformed_w, transformed_h) = {
+            let mut w = buf_w / scale;
+            let mut h = buf_h / scale;
+            if cur.transform.unwrap_or(wl_output::Transform::Normal) as u32 & 1 != 0 {
+                std::mem::swap(&mut w, &mut h);
+            }
+            (w, h)
+        };
+
+        if let Some((x, y, w, h)) = cur.viewport_src {
+            if x + w.as_f64() > transformed_w as f64 || y + h.as_f64() > transformed_h as f64 {
+                return Err(io::Error::other("viewport src out of buffer"));
+            }
         }
 
         Ok(if let Some((w, h)) = cur.viewport_dst {
@@ -181,13 +196,7 @@ impl Surface {
             }
             Some((w.as_int() as u32, h.as_int() as u32))
         } else {
-            use wl_output::Transform;
-            let mut w = w;
-            let mut h = h;
-            if cur.transform.unwrap_or(Transform::Normal) as u32 & 1 != 0 {
-                std::mem::swap(&mut w, &mut h);
-            }
-            Some((w, h))
+            Some((transformed_w, transformed_h))
         })
     }
 
@@ -200,9 +209,6 @@ impl Surface {
                     None => (0.0, 0.0, dst_width as f64, dst_height as f64),
                     Some((x, y, w, h)) => (x, y, w.as_f64(), h.as_f64()),
                 };
-                if src_x + src_width > buf_width as f64 || src_y + src_height > buf_height as f64 {
-                    return Err(io::Error::other("viewport src out of buffer"));
-                }
                 Some(BufferTransform {
                     buf_id,
                     buf_width,
