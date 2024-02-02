@@ -9,7 +9,7 @@ mod gl46_renderer;
 mod pixman_renderer;
 pub mod wayland;
 
-use crate::globals::compositor::BufferTransform;
+use crate::buffer_transform::BufferTransform;
 use crate::globals::linux_dmabuf::DmaBufSpec;
 use crate::globals::shm::{ShmBufferSpec, ShmPool};
 use crate::protocol;

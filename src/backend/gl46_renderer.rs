@@ -479,10 +479,8 @@ impl Frame for FrameImp<'_> {
             self.state.flush_quads();
         }
 
-        match &self.state.textures[&buf_transform.buf_id].kind {
+        match &self.state.textures[&buf_transform.buf_id()].kind {
             TextureKind::Gl(tex) => {
-                assert_eq!(tex.width, buf_transform.buf_width);
-                assert_eq!(tex.height, buf_transform.buf_height);
                 let uv_mat = buf_transform.surface_to_uv().unwrap();
 
                 let tl = uv_mat
@@ -490,7 +488,7 @@ impl Frame for FrameImp<'_> {
                     .unwrap();
                 let tr = uv_mat
                     .transform_point(pixman::FVector::new([
-                        buf_transform.dst_width as f64,
+                        buf_transform.dst_width() as f64,
                         0.0,
                         1.0,
                     ]))
@@ -498,14 +496,14 @@ impl Frame for FrameImp<'_> {
                 let bl = uv_mat
                     .transform_point(pixman::FVector::new([
                         0.0,
-                        buf_transform.dst_height as f64,
+                        buf_transform.dst_height() as f64,
                         1.0,
                     ]))
                     .unwrap();
                 let br = uv_mat
                     .transform_point(pixman::FVector::new([
-                        buf_transform.dst_width as f64,
-                        buf_transform.dst_height as f64,
+                        buf_transform.dst_width() as f64,
+                        buf_transform.dst_height() as f64,
                         1.0,
                     ]))
                     .unwrap();
@@ -528,10 +526,10 @@ impl Frame for FrameImp<'_> {
                 };
                 self.state.bound_textures += 1;
                 self.state.verts.push(vert);
-                vert.x = (x + buf_transform.dst_width as i32) as f32;
+                vert.x = (x + buf_transform.dst_width() as i32) as f32;
                 vert.col = Color::from_tex_uv(tr.0, tr.1, tex_i, alpha);
                 self.state.verts.push(vert);
-                vert.y = (y + buf_transform.dst_height as i32) as f32;
+                vert.y = (y + buf_transform.dst_height() as i32) as f32;
                 vert.col = Color::from_tex_uv(br.0, br.1, tex_i, alpha);
                 self.state.verts.push(vert);
                 self.state.verts.push(vert);
@@ -550,9 +548,9 @@ impl Frame for FrameImp<'_> {
                 };
                 self.state.bound_textures += 1;
                 self.state.verts.push(vert);
-                vert.x = (x + buf_transform.dst_width as i32) as f32;
+                vert.x = (x + buf_transform.dst_width() as i32) as f32;
                 self.state.verts.push(vert);
-                vert.y = (y + buf_transform.dst_height as i32) as f32;
+                vert.y = (y + buf_transform.dst_height() as i32) as f32;
                 self.state.verts.push(vert);
                 self.state.verts.push(vert);
                 vert.x = x as f32;

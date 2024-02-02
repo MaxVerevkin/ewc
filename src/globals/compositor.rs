@@ -5,6 +5,7 @@ use std::rc::{Rc, Weak};
 
 use super::xdg_shell;
 use crate::backend::{Backend, BufferId};
+use crate::buffer_transform::BufferTransform;
 use crate::client::RequestCtx;
 use crate::globals::{GlobalsManager, IsGlobal};
 use crate::wayland_core::Proxy;
@@ -32,11 +33,11 @@ impl Compositor {
     pub fn release_buffers(self, backend: &mut dyn Backend) {
         for surface in self.surfaces.values() {
             if let Some(subsurf) = surface.get_subsurface() {
-                if let Some((buf_id, _, _)) = subsurf.cached_state.borrow().buffer {
+                if let Some(buf_id) = subsurf.cached_state.borrow().buffer {
                     backend.renderer_state().buffer_unlock(buf_id);
                 }
             }
-            if let Some((buf_id, _, _)) = surface.cur.borrow().buffer {
+            if let Some(buf_id) = surface.cur.borrow().buffer {
                 backend.renderer_state().buffer_unlock(buf_id);
             }
         }
@@ -57,9 +58,9 @@ pub struct Surface {
 pub struct SurfaceState {
     pub mask: CommitedMask,
 
-    pub buffer: Option<(BufferId, u32, u32)>,
+    pub buffer: Option<BufferId>,
     pub transform: Option<wl_output::Transform>,
-    pub scale: Option<u32>,
+    pub scale: Option<i32>,
     pub opaque_region: Option<pixman::Region32>,
     pub input_region: Option<pixman::Region32>,
     pub subsurfaces: Vec<SubsurfaceNode>,
@@ -76,7 +77,7 @@ impl SurfaceState {
         }
         dst.mask.0 |= self.mask.0;
         if self.mask.contains(CommittedMaskBit::Buffer) {
-            if let Some((old_buf, _, _)) = dst.buffer {
+            if let Some(old_buf) = dst.buffer {
                 state.backend.renderer_state().buffer_unlock(old_buf);
             }
             dst.buffer = self.buffer.take();
@@ -164,68 +165,21 @@ impl Surface {
         }
     }
 
-    fn effective_buffer_size(&self) -> io::Result<Option<(u32, u32)>> {
+    fn validate_and_update_buf_transform(&self, backend: &mut dyn Backend) -> io::Result<()> {
         let cur = self.cur.borrow();
-        let Some((_id, buf_w, buf_h)) = cur.buffer else { return Ok(None) };
-        let scale = cur.scale.unwrap_or(1);
-
-        if buf_w % scale != 0 || buf_h % scale != 0 {
-            return Err(io::Error::other("buffer size not a multiple of scale"));
-        }
-
-        let (transformed_w, transformed_h) = {
-            let mut w = buf_w / scale;
-            let mut h = buf_h / scale;
-            if cur.transform.unwrap_or(wl_output::Transform::Normal) as u32 & 1 != 0 {
-                std::mem::swap(&mut w, &mut h);
-            }
-            (w, h)
-        };
-
-        if let Some((x, y, w, h)) = cur.viewport_src {
-            if x + w.as_f64() > transformed_w as f64 || y + h.as_f64() > transformed_h as f64 {
-                return Err(io::Error::other("viewport src out of buffer"));
-            }
-        }
-
-        Ok(if let Some((w, h)) = cur.viewport_dst {
-            Some((w, h))
-        } else if let Some((_x, _y, w, h)) = cur.viewport_src {
-            if !h.is_int() || !w.is_int() {
-                return Err(io::Error::other("viewport dst not set, so src must by int"));
-            }
-            Some((w.as_int() as u32, h.as_int() as u32))
-        } else {
-            Some((transformed_w, transformed_h))
-        })
-    }
-
-    fn validate_and_update_buf_transform(&self) -> io::Result<()> {
-        let buf_transform = match self.effective_buffer_size()? {
-            Some((dst_width, dst_height)) => {
-                let cur = self.cur.borrow();
-                let (buf_id, buf_width, buf_height) = cur.buffer.unwrap();
-                let (src_x, src_y, src_width, src_height) = match cur.viewport_src {
-                    None => (0.0, 0.0, dst_width as f64, dst_height as f64),
-                    Some((x, y, w, h)) => (x, y, w.as_f64(), h.as_f64()),
-                };
-                Some(BufferTransform {
+        match cur.buffer {
+            Some(buf_id) => {
+                self.buf_transform.set(Some(BufferTransform::new(
                     buf_id,
-                    buf_width,
-                    buf_height,
-                    transform: cur.transform.unwrap_or(wl_output::Transform::Normal),
-                    scale: 1,
-                    src_x,
-                    src_y,
-                    src_width,
-                    src_height,
-                    dst_width,
-                    dst_height,
-                })
+                    backend,
+                    cur.transform.unwrap_or(wl_output::Transform::Normal),
+                    cur.scale.unwrap_or(1),
+                    cur.viewport_src,
+                    cur.viewport_dst,
+                )?));
             }
-            None => None,
-        };
-        self.buf_transform.set(buf_transform);
+            None => self.buf_transform.set(None),
+        }
         Ok(())
     }
 
@@ -238,8 +192,8 @@ impl Surface {
         let mut bbox = pixman::Box32 {
             x1: 0,
             y1: 0,
-            x2: buf_transfom.dst_width as i32,
-            y2: buf_transfom.dst_height as i32,
+            x2: buf_transfom.dst_width() as i32,
+            y2: buf_transfom.dst_height() as i32,
         };
         for sub in &self.cur.borrow().subsurfaces {
             if let Some(sub_box) = sub.surface.get_bounding_box() {
@@ -317,7 +271,7 @@ impl Surface {
                 .borrow_mut()
                 .apply_to_and_clear(&mut self.cur.borrow_mut(), state);
         }
-        self.validate_and_update_buf_transform()?; // todo: run only if relevant data was updated
+        self.validate_and_update_buf_transform(state.backend.as_mut())?; // todo: run only if relevant data was updated
         for subs in &self.cur.borrow().subsurfaces {
             subs.surface.apply_cache(state)?;
         }
@@ -509,14 +463,12 @@ fn wl_surface_cb(ctx: RequestCtx<WlSurface>) -> io::Result<()> {
                 surface.pending.borrow_mut().buffer =
                     surface.pending_buffer.take().and_then(|pending_buffer| {
                         if pending_buffer.is_alive() {
-                            let buf_id = ctx
-                                .state
-                                .backend
-                                .renderer_state()
-                                .buffer_commited(pending_buffer);
-                            let (width, height) =
-                                ctx.state.backend.renderer_state().get_buffer_size(buf_id);
-                            Some((buf_id, width, height))
+                            Some(
+                                ctx.state
+                                    .backend
+                                    .renderer_state()
+                                    .buffer_commited(pending_buffer),
+                            )
                         } else {
                             None
                         }
@@ -545,11 +497,8 @@ fn wl_surface_cb(ctx: RequestCtx<WlSurface>) -> io::Result<()> {
             pending.mask.set(CommittedMaskBit::Transform);
         }
         Request::SetBufferScale(scale) => {
-            if scale < 1 {
-                return Err(io::Error::other("invalid buffer scale"));
-            }
             let mut pending = surface.pending.borrow_mut();
-            pending.scale = Some(scale as u32);
+            pending.scale = Some(scale);
             pending.mask.set(CommittedMaskBit::Scale);
         }
         Request::DamageBuffer(_) => (),
@@ -703,60 +652,4 @@ fn wp_viewport_cb(ctx: RequestCtx<WpViewport>) -> io::Result<()> {
         }
     }
     Ok(())
-}
-
-#[derive(Clone, Copy)]
-pub struct BufferTransform {
-    pub buf_id: BufferId,
-    pub buf_width: u32,
-    pub buf_height: u32,
-    pub transform: wl_output::Transform,
-    pub scale: u32,
-    pub src_x: f64,
-    pub src_y: f64,
-    pub src_width: f64,
-    pub src_height: f64,
-    pub dst_width: u32,
-    pub dst_height: u32,
-}
-
-impl BufferTransform {
-    pub fn surface_to_buffer(&self) -> Option<pixman::FTransform> {
-        let mut mat = pixman::FTransform::identity()
-            .scale(
-                self.src_width / self.dst_width as f64,
-                self.src_height / self.dst_height as f64,
-                false,
-            )?
-            .translate(self.src_x, self.src_y, false)?
-            .scale(self.scale as f64, self.scale as f64, false)?;
-        if self.transform as u32 & 4 != 0 {
-            mat = mat
-                .scale(-1.0, 1.0, false)?
-                .translate(self.buf_width as f64, 0.0, false)?;
-        }
-        if self.transform as u32 & 1 != 0 {
-            mat = mat
-                .rotate(0.0, -1.0, false)?
-                .translate(0.0, self.buf_height as f64, false)?;
-        }
-        if self.transform as u32 & 2 != 0 {
-            mat = mat.rotate(-1.0, 0.0, false)?.translate(
-                self.buf_width as f64,
-                self.buf_height as f64,
-                false,
-            )?;
-        }
-        Some(mat)
-    }
-
-    pub fn surface_to_uv(&self) -> Option<pixman::FTransform> {
-        self.surface_to_buffer().and_then(|m| {
-            m.scale(
-                1.0 / self.buf_width as f64,
-                1.0 / self.buf_height as f64,
-                false,
-            )
-        })
-    }
 }

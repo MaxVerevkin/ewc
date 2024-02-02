@@ -15,6 +15,7 @@ use globals::single_pixel_buffer::SinglePixelBufferManager;
 use xkbcommon::xkb;
 
 mod backend;
+mod buffer_transform;
 mod client;
 mod cursor;
 mod event_loop;
@@ -29,7 +30,7 @@ use crate::client::{Client, ClientId};
 use crate::cursor::Cursor;
 use crate::event_loop::EventLoop;
 use crate::focus_stack::FocusStack;
-use crate::globals::compositor::{BufferTransform, Compositor, Surface};
+use crate::globals::compositor::{Compositor, Surface};
 use crate::globals::ewc_debug::Debugger;
 use crate::globals::linux_dmabuf::LinuxDmabuf;
 use crate::globals::GlobalsManager;
@@ -324,24 +325,11 @@ impl Server {
                                 );
                             }
                         }
-                        if let Some((buf_id, hx, hy, w, h)) = self.state.cursor.get_buffer() {
+                        if let Some((buf_transform, hx, hy)) = self.state.cursor.get_buffer() {
                             frame.render_buffer(
                                 None,
                                 1.0,
-                                // TODO: support transform on cursors
-                                BufferTransform {
-                                    buf_id,
-                                    buf_width: w,
-                                    buf_height: h,
-                                    transform: wl_output::Transform::Normal,
-                                    scale: 1,
-                                    src_x: 0.0,
-                                    src_y: 0.0,
-                                    src_width: w as f64,
-                                    src_height: h as f64,
-                                    dst_width: w,
-                                    dst_height: h,
-                                },
+                                buf_transform,
                                 self.state.seat.pointer.x.round() as i32 - hx,
                                 self.state.seat.pointer.y.round() as i32 - hy,
                             );
@@ -565,9 +553,15 @@ fn print_client_surface_tree(client: &Client) {
                         sub.surface.wl,
                         sub.surface.get_subsurface().unwrap().wl,
                     );
-                    match sub.surface.cur.borrow().buffer {
-                        Some((_buffer, w, h)) => {
-                            eprintln!(" {},{} {w}x{h}", sub.position.0, sub.position.1,);
+                    match sub.surface.buf_transform() {
+                        Some(transform) => {
+                            eprintln!(
+                                " {},{} {}x{}",
+                                sub.position.0,
+                                sub.position.1,
+                                transform.dst_width(),
+                                transform.dst_height()
+                            );
                             subtree(client, indent + 4, Some(&sub.surface));
                         }
                         None => {
@@ -585,9 +579,9 @@ fn print_client_surface_tree(client: &Client) {
                         globals::compositor::SurfaceRole::Xdg(_) => "xdg",
                     };
                     eprint!("{}{:?} ({role})", " ".repeat(indent), s.wl);
-                    match s.cur.borrow().buffer {
-                        Some((_buffer, w, h)) => {
-                            eprintln!(" {w}x{h}");
+                    match s.buf_transform() {
+                        Some(transform) => {
+                            eprintln!(" {}x{}", transform.dst_width(), transform.dst_height());
                             subtree(client, indent + 4, Some(s));
                         }
                         None => eprintln!(" <not mapped>"),

@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::backend::{Backend, BufferId};
+use crate::backend::Backend;
+use crate::buffer_transform::BufferTransform;
 use crate::client::ClientId;
 use crate::globals::compositor::Surface;
+use crate::protocol::wl_output;
 use crate::protocol::wp_cursor_shape_device_v1::Shape;
 use crate::Proxy;
 
@@ -14,11 +16,9 @@ pub struct Cursor {
 
 #[derive(Clone, Copy)]
 struct Texture {
-    buffer_id: BufferId,
+    buf_transform: BufferTransform,
     hx: i32,
     hy: i32,
-    w: u32,
-    h: u32,
 }
 
 enum Kind {
@@ -71,20 +71,14 @@ impl Cursor {
         }
     }
 
-    pub fn get_buffer(&self) -> Option<(BufferId, i32, i32, u32, u32)> {
+    pub fn get_buffer(&self) -> Option<(BufferTransform, i32, i32)> {
         match &self.kind {
             Kind::Hidden => None,
             Kind::Surface { surface, hx, hy } => {
                 let buf_transform = surface.buf_transform()?;
-                let w = buf_transform.buf_width;
-                let h = buf_transform.buf_height;
-                surface
-                    .cur
-                    .borrow()
-                    .buffer
-                    .map(|(buf, _, _)| (buf, *hx, *hy, w, h))
+                Some((buf_transform, *hx, *hy))
             }
-            Kind::Texture(tex) => Some((tex.buffer_id, tex.hx, tex.hy, tex.w, tex.h)),
+            Kind::Texture(tex) => Some((tex.buf_transform, tex.hx, tex.hy)),
         }
     }
 
@@ -109,16 +103,17 @@ fn get_texture(
     images.sort_by(|a, b| a.size.cmp(&b.size));
     let (Ok(i) | Err(i)) = images.binary_search_by_key(&24, |x| x.size);
     let image = images.get(i).or_else(|| images.last())?;
+    let buf_id = backend.renderer_state().create_argb8_texture(
+        image.width,
+        image.height,
+        &image.pixels_rgba,
+    );
+    let buf_transform =
+        BufferTransform::new(buf_id, backend, wl_output::Transform::Normal, 1, None, None).unwrap();
     Some(Texture {
-        buffer_id: backend.renderer_state().create_argb8_texture(
-            image.width,
-            image.height,
-            &image.pixels_rgba,
-        ),
+        buf_transform,
         hx: image.xhot as i32,
         hy: image.yhot as i32,
-        w: image.width,
-        h: image.height,
     })
 }
 

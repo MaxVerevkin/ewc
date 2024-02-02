@@ -260,7 +260,7 @@ impl Frame for FrameImp<'_> {
         let t;
         let t2;
 
-        let buf = &self.state.buffers[&buf_transform.buf_id];
+        let buf = &self.state.buffers[&buf_transform.buf_id()];
         let (src, tex_width, tex_height) = match &buf.kind {
             BufferKind::Shm(shm) => {
                 let spec = &shm.spec;
@@ -301,8 +301,6 @@ impl Frame for FrameImp<'_> {
                 (&*t2, 1, 1)
             }
         };
-        assert_eq!(tex_width, buf_transform.buf_width);
-        assert_eq!(tex_height, buf_transform.buf_height);
 
         let mat = buf_transform.surface_to_buffer().unwrap();
         src.set_transform(pixman::Transform::try_from(mat).unwrap())
@@ -334,8 +332,8 @@ impl Frame for FrameImp<'_> {
             (0, 0),
             (x, y),
             (
-                buf_transform.dst_width as i32,
-                buf_transform.dst_height as i32,
+                buf_transform.dst_width() as i32,
+                buf_transform.dst_height() as i32,
             ),
         );
     }
