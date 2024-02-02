@@ -11,59 +11,51 @@ pub struct FocusStack {
     inner: Vec<Weak<XdgToplevelRole>>,
 }
 
-impl FocusStack {
-    pub fn toplevel_at(&self, x: f32, y: f32) -> Option<usize> {
-        for (toplevel_i, toplevel) in self.inner.iter().enumerate().rev() {
-            let tl = toplevel.upgrade().unwrap();
-            let xdg = tl.xdg_surface.upgrade().unwrap();
-            let Some(geom) = xdg.get_window_geometry() else { continue };
-            let tlx = x - tl.x.get() as f32;
-            let tly = y - tl.y.get() as f32;
-            if tlx >= 0.0
-                && tly >= 0.0
-                && tlx < geom.width.get() as f32
-                && tly < geom.height.get() as f32
-            {
-                return Some(toplevel_i);
-            }
-        }
-        None
-    }
+pub struct SurfaceUnderCursor {
+    pub sx: f32,
+    pub sy: f32,
+    pub surf: Rc<Surface>,
+    pub toplevel_idx: usize,
+}
 
-    pub fn surface_at(&self, x: i32, y: i32) -> Option<(usize, Rc<Surface>, f32, f32)> {
-        fn surface_at(surf: Rc<Surface>, x: i32, y: i32) -> Option<(Rc<Surface>, i32, i32)> {
+impl FocusStack {
+    pub fn surface_at(&self, x: f32, y: f32) -> Option<SurfaceUnderCursor> {
+        fn surface_at(surf: Rc<Surface>, x: f32, y: f32) -> Option<(Rc<Surface>, f32, f32)> {
             for subs in surf.cur.borrow().subsurfaces.iter().rev() {
                 if let Some(res) = surface_at(
                     subs.surface.clone(),
-                    x - subs.position.0,
-                    y - subs.position.1,
+                    x - subs.position.0 as f32,
+                    y - subs.position.1 as f32,
                 ) {
                     return Some(res);
                 }
             }
             let (_, w, h) = surf.cur.borrow().buffer?;
-            let ok = x >= 0
-                && y >= 0
-                && x < w as i32
-                && y < h as i32
-                && surf
-                    .cur
-                    .borrow()
-                    .input_region
-                    .as_ref()
-                    .map_or(true, |reg| reg.contains_point(x, y).is_some());
+            let ok = x >= 0.0
+                && y >= 0.0
+                && x < w as f32
+                && y < h as f32
+                && surf.cur.borrow().input_region.as_ref().map_or(true, |reg| {
+                    reg.contains_point(x.round() as i32, y.round() as i32)
+                        .is_some()
+                });
             ok.then_some((surf, x, y))
         }
-        for (toplevel_i, toplevel) in self.inner.iter().enumerate().rev() {
+        for (toplevel_idx, toplevel) in self.inner.iter().enumerate().rev() {
             let tl = toplevel.upgrade().unwrap();
             let xdg = tl.xdg_surface.upgrade().unwrap();
             let Some(geom) = xdg.get_window_geometry() else { continue };
             if let Some((surf, sx, sy)) = surface_at(
                 tl.wl_surface.upgrade().unwrap(),
-                x - tl.x.get() + geom.x,
-                y - tl.y.get() + geom.y,
+                x - (tl.x.get() - geom.x) as f32,
+                y - (tl.y.get() - geom.y) as f32,
             ) {
-                return Some((toplevel_i, surf, sx as f32, sy as f32));
+                return Some(SurfaceUnderCursor {
+                    sx,
+                    sy,
+                    surf,
+                    toplevel_idx,
+                });
             }
         }
         None

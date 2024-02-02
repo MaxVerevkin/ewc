@@ -232,14 +232,16 @@ impl Server {
                     let sx = self.state.seat.pointer.x.round() - x as f32;
                     let sy = self.state.seat.pointer.y.round() - y as f32;
                     self.state.seat.pointer.forward_pointer(surf, sx, sy);
-                } else if let Some((_i, surf, sx, sy)) = self.state.focus_stack.surface_at(
-                    self.state.seat.pointer.x.round() as i32,
-                    self.state.seat.pointer.y.round() as i32,
-                ) {
-                    self.state
-                        .seat
-                        .pointer
-                        .forward_pointer(surf.clone(), sx, sy);
+                } else if let Some(surf_under) = self
+                    .state
+                    .focus_stack
+                    .surface_at(self.state.seat.pointer.x, self.state.seat.pointer.y)
+                {
+                    self.state.seat.pointer.forward_pointer(
+                        surf_under.surf,
+                        surf_under.sx,
+                        surf_under.sy,
+                    );
                 } else {
                     self.state.seat.pointer.leave_any_surface();
                     self.state.cursor.set_shape(Shape::Default);
@@ -385,15 +387,19 @@ impl Server {
                     let mut handeled = false;
 
                     if self.state.seat.pointer.number_of_pressed_buttons() == 0 {
-                        if let Some(toplevel_i) = self
+                        if let Some(surf_under) = self
                             .state
                             .focus_stack
-                            .toplevel_at(self.state.seat.pointer.x, self.state.seat.pointer.y)
+                            .surface_at(self.state.seat.pointer.x, self.state.seat.pointer.y)
                         {
-                            let toplevel = self.state.focus_stack.get_i(toplevel_i).unwrap();
+                            let toplevel = self
+                                .state
+                                .focus_stack
+                                .get_i(surf_under.toplevel_idx)
+                                .unwrap();
                             self.state
                                 .focus_stack
-                                .focus_i(toplevel_i, &mut self.state.seat);
+                                .focus_i(surf_under.toplevel_idx, &mut self.state.seat);
 
                             if self.state.seat.keyboard.get_mods().alt {
                                 if btn == BTN_LEFT {
