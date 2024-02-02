@@ -122,6 +122,7 @@ pub struct XdgToplevelRole {
     pub dirty_app_id: Cell<bool>,
     pub dirty_title: Cell<bool>,
     pub dirty_min_size: Cell<bool>,
+    pub dirty_max_size: Cell<bool>,
 }
 
 #[derive(Clone, Copy)]
@@ -170,8 +171,26 @@ impl XdgToplevelRole {
         }
     }
 
-    pub fn request_size(&self, edge: ResizeEdge, width: NonZeroU32, height: NonZeroU32) {
+    pub fn request_size(&self, edge: ResizeEdge, mut width: NonZeroU32, mut height: NonZeroU32) {
         if self.map_state.get() == MapState::Mapped {
+            let cur = self.cur.borrow();
+            if let Some((max_w, max_h)) = cur.max_size {
+                if max_w != 0 && width.get() > max_w {
+                    width = NonZeroU32::new(max_w).unwrap();
+                }
+                if max_h != 0 && height.get() > max_h {
+                    height = NonZeroU32::new(max_h).unwrap();
+                }
+            }
+            if let Some((min_w, min_h)) = cur.min_size {
+                if min_w != 0 && width.get() < min_w {
+                    width = NonZeroU32::new(min_w).unwrap();
+                }
+                if min_h != 0 && height.get() < min_h {
+                    height = NonZeroU32::new(min_h).unwrap();
+                }
+            }
+
             let mut configure = self.pending_configure.take().unwrap_or_else(|| {
                 let mut c = self.cur_configure.get();
                 c.serial += 1;
@@ -209,6 +228,7 @@ pub struct XdgToplevelState {
     pub app_id: Option<CString>,
     pub title: Option<CString>,
     pub min_size: Option<(u32, u32)>,
+    pub max_size: Option<(u32, u32)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -310,6 +330,7 @@ fn xdg_surface_cb(ctx: RequestCtx<XdgSurface>) -> io::Result<()> {
                 dirty_app_id: Cell::new(false),
                 dirty_title: Cell::new(false),
                 dirty_min_size: Cell::new(false),
+                dirty_max_size: Cell::new(false),
             });
             ctx.client
                 .compositor
@@ -378,8 +399,11 @@ fn xdg_toplevel_cb(ctx: RequestCtx<XdgToplevel>) -> io::Result<()> {
                 .start_resize(args.edges, toplevel.clone());
         }
         Request::SetMaxSize(args) => {
-            assert_eq!(args.width, 0, "unmiplemented");
-            assert_eq!(args.height, 0, "unmiplemented");
+            if args.width < 0 || args.height < 0 {
+                return Err(io::Error::other("max size cannot be negative"));
+            }
+            toplevel.dirty_max_size.set(true);
+            toplevel.pending.borrow_mut().max_size = Some((args.width as u32, args.height as u32));
         }
         Request::SetMinSize(args) => {
             if args.width < 0 || args.height < 0 {
@@ -433,6 +457,10 @@ pub fn surface_commit(state: &mut State, xdg_surface: &XdgSurfaceRole) -> io::Re
             if toplevel.dirty_min_size.get() {
                 toplevel.dirty_min_size.set(false);
                 toplevel.cur.borrow_mut().min_size = toplevel.pending.borrow_mut().min_size;
+            }
+            if toplevel.dirty_max_size.get() {
+                toplevel.dirty_max_size.set(false);
+                toplevel.cur.borrow_mut().max_size = toplevel.pending.borrow_mut().max_size;
             }
 
             match toplevel.map_state.get() {
