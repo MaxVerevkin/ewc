@@ -18,7 +18,8 @@ pub struct Compositor {
     pub surfaces: HashMap<WlSurface, Rc<Surface>>,
     pub subsurfaces: HashMap<WlSubsurface, Rc<SubsurfaceRole>>,
     pub xdg_surfaces: HashMap<XdgSurface, Rc<xdg_shell::XdgSurfaceRole>>,
-    pub xdg_toplevels: HashMap<XdgToplevel, Rc<xdg_shell::XdgToplevelRole>>,
+    pub xdg_toplevels: HashMap<XdgToplevel, Rc<xdg_shell::toplevel::XdgToplevelRole>>,
+    pub xdg_positioners: HashMap<XdgPositioner, xdg_shell::Positioner>,
     pub viewporters: HashMap<WpViewport, Weak<Surface>>,
 }
 
@@ -42,6 +43,13 @@ impl Compositor {
             }
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MapState {
+    Unmapped,
+    WaitingFirstBuffer,
+    Mapped,
 }
 
 pub struct Surface {
@@ -486,8 +494,12 @@ fn wl_surface_cb(ctx: RequestCtx<WlSurface>) -> io::Result<()> {
                     .borrow_mut()
                     .apply_to_and_clear(&mut surface.cur.borrow_mut(), ctx.state);
                 surface.apply_cache(ctx.state)?;
-                if let Some(xdg) = surface.get_xdg_surface() {
-                    xdg_shell::surface_commit(ctx.state, &xdg)?;
+
+                match &*surface.role.borrow() {
+                    SurfaceRole::None => (),
+                    SurfaceRole::Xdg(xdg) => xdg.committed(ctx.state)?,
+                    SurfaceRole::Cursor => (),
+                    SurfaceRole::Subsurface(_) => (),
                 }
             }
         }

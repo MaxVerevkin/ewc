@@ -3,7 +3,7 @@ use std::rc::{Rc, Weak};
 
 use crate::client::RequestCtx;
 use crate::globals::compositor::{Surface, SurfaceRole};
-use crate::globals::xdg_shell::XdgToplevelRole;
+use crate::globals::xdg_shell::toplevel::XdgToplevelRole;
 use crate::protocol::*;
 use crate::wayland_core::{Fixed, Proxy};
 

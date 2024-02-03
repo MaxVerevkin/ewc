@@ -2,7 +2,7 @@ use std::rc::{Rc, Weak};
 
 use crate::client::ClientId;
 use crate::globals::compositor::Surface;
-use crate::globals::xdg_shell::XdgToplevelRole;
+use crate::globals::xdg_shell::toplevel::XdgToplevelRole;
 use crate::seat::Seat;
 use crate::wayland_core::Proxy;
 
