@@ -68,10 +68,7 @@ impl XdgToplevelRole {
 
     fn unmap(&self, state: &mut State) {
         self.map_state.set(MapState::Unmapped);
-        state.focus_stack.remove(self);
-        state
-            .seat
-            .unfocus_surface(&self.wl_surface.upgrade().unwrap().wl);
+        self.wl_surface.upgrade().unwrap().unmap(state);
     }
 
     pub fn apply_pending_configure(&self) {

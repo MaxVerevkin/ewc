@@ -174,6 +174,16 @@ impl Surface {
         }
     }
 
+    pub fn unmap(&self, state: &mut State) {
+        if let Some(toplevel) = self.get_xdg_toplevel() {
+            state.focus_stack.remove(&toplevel);
+        }
+        state.seat.unfocus_surface(&self.wl);
+        for sub in &self.cur.borrow().subsurfaces {
+            sub.surface.unmap(state);
+        }
+    }
+
     fn validate_and_update_buf_transform(&self, backend: &mut dyn Backend) -> io::Result<()> {
         let cur = self.cur.borrow();
         match cur.buffer {
