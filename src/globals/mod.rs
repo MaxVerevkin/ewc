@@ -132,6 +132,26 @@ impl Global {
 
 impl IsGlobal for WlOutput {
     fn on_bind(&self, _client: &mut Client, _state: &mut State) {
-        // TODO
+        // For some unholy reason, firefox would disable popups without output info, so for now,
+        // send this dummy info.
+        self.geometry(
+            0,
+            0,
+            0,
+            0,
+            wl_output::Subpixel::Unknown,
+            c"N/A".into(),
+            c"N/A".into(),
+            wl_output::Transform::Normal,
+        );
+        self.mode(
+            wl_output::Mode::Current | wl_output::Mode::Preferred,
+            200,
+            200,
+            0,
+        );
+        if self.version() >= 2 {
+            self.done();
+        }
     }
 }
