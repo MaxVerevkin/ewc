@@ -11,13 +11,19 @@ use crate::protocol::*;
 use crate::wayland_core::Proxy;
 use crate::State;
 
+pub mod popup;
+pub mod positioner;
 pub mod toplevel;
-use toplevel::{xdg_toplevel_cb, XdgToplevelRole};
+
+use popup::XdgPopupRole;
+use positioner::{Positioner, RawPositioner};
+use toplevel::XdgToplevelRole;
 
 pub struct XdgSurfaceRole {
     pub wl: XdgSurface,
     pub wl_surface: Weak<Surface>,
-    specific: RefCell<SpecificRole>,
+    pub specific: RefCell<SpecificRole>,
+    pub popup: RefCell<Option<Rc<XdgPopupRole>>>,
     last_acked_configure: Cell<Option<u32>>,
 
     cur: XdgSurfaceState,
@@ -61,7 +67,7 @@ impl XdgSurfaceRole {
         match &*self.specific.borrow() {
             SpecificRole::None => Ok(()),
             SpecificRole::Toplevel(toplevel) => toplevel.committed(state),
-            SpecificRole::_Popup => todo!(),
+            SpecificRole::Popup(popup) => popup.committed(state),
         }
     }
 }
@@ -120,27 +126,16 @@ impl From<WindowGeometry> for pixman::Box32 {
 pub enum SpecificRole {
     None,
     Toplevel(Rc<XdgToplevelRole>),
-    _Popup,
+    Popup(Rc<XdgPopupRole>),
 }
 
 impl SpecificRole {
-    pub fn _get_toplevel(&self) -> Option<&XdgToplevelRole> {
+    pub fn get_toplevel(&self) -> Option<Rc<XdgToplevelRole>> {
         match self {
-            SpecificRole::Toplevel(tl) => Some(tl),
+            SpecificRole::Toplevel(tl) => Some(tl.clone()),
             _ => None,
         }
     }
-}
-
-#[derive(Debug, Default, Clone, Copy)]
-pub struct Positioner {
-    size: Option<(NonZeroU32, NonZeroU32)>,
-    anchor_rect: Option<(i32, i32, i32, i32)>,
-    offset: (i32, i32),
-    anchor: Option<xdg_positioner::Anchor>,
-    gravity: Option<xdg_positioner::Gravity>,
-    contraint_adjustment: u32,
-    reactive: bool,
 }
 
 impl IsGlobal for XdgWmBase {
@@ -162,11 +157,11 @@ impl IsGlobal for XdgWmBase {
                     }
                 }
                 Request::CreatePositioner(positioner) => {
-                    positioner.set_callback(xdg_positioner_cb);
+                    positioner.set_callback(positioner::xdg_positioner_cb);
                     ctx.client
                         .compositor
                         .xdg_positioners
-                        .insert(positioner, Positioner::default());
+                        .insert(positioner, RawPositioner::default());
                 }
                 Request::GetXdgSurface(args) => {
                     let surface = ctx.client.compositor.surfaces.get(&args.surface).unwrap();
@@ -178,6 +173,7 @@ impl IsGlobal for XdgWmBase {
                         wl: args.id.clone(),
                         wl_surface: Rc::downgrade(surface),
                         specific: RefCell::new(SpecificRole::None),
+                        popup: RefCell::new(None),
                         last_acked_configure: Cell::new(None),
 
                         cur: XdgSurfaceState::default(),
@@ -214,7 +210,6 @@ fn xdg_surface_cb(ctx: RequestCtx<XdgSurface>) -> io::Result<()> {
             if !matches!(&*xdg_surface.specific.borrow(), SpecificRole::None) {
                 return Err(io::Error::other("xdg surface already has a role"));
             }
-            toplevel.set_callback(xdg_toplevel_cb);
             if toplevel.version() >= 5 {
                 toplevel.wm_capabilities(Vec::new());
             }
@@ -226,16 +221,23 @@ fn xdg_surface_cb(ctx: RequestCtx<XdgSurface>) -> io::Result<()> {
             *xdg_surface.specific.borrow_mut() = SpecificRole::Toplevel(toplevel);
         }
         Request::GetPopup(args) => {
-            let positioner = *ctx
-                .client
+            let parent = args
+                .parent
+                .ok_or_else(|| io::Error::other("get_popup with null parent"))?;
+            let parent = ctx.client.compositor.xdg_surfaces.get(&parent).unwrap();
+            let positioner = Positioner::from_raw(
+                *ctx.client
+                    .compositor
+                    .xdg_positioners
+                    .get(&args.positioner)
+                    .unwrap(),
+            )?;
+            let popup = Rc::new(XdgPopupRole::new(args.id, xdg_surface, parent, positioner));
+            ctx.client
                 .compositor
-                .xdg_positioners
-                .get(&args.positioner)
-                .unwrap();
-            dbg!(args.id);
-            dbg!(positioner);
-            dbg!(args.parent);
-            todo!();
+                .xdg_popups
+                .insert(popup.wl.clone(), popup.clone());
+            *xdg_surface.specific.borrow_mut() = SpecificRole::Popup(popup);
         }
         Request::SetWindowGeometry(args) => {
             if args.width <= 0 || args.height <= 0 {
@@ -256,54 +258,6 @@ fn xdg_surface_cb(ctx: RequestCtx<XdgSurface>) -> io::Result<()> {
         Request::AckConfigure(serial) => {
             xdg_surface.last_acked_configure.set(Some(serial));
         }
-    }
-    Ok(())
-}
-
-fn xdg_positioner_cb(ctx: RequestCtx<XdgPositioner>) -> io::Result<()> {
-    let positioner = ctx
-        .client
-        .compositor
-        .xdg_positioners
-        .get_mut(&ctx.proxy)
-        .unwrap();
-
-    use xdg_positioner::Request;
-    match ctx.request {
-        Request::Destroy => {
-            ctx.client.compositor.xdg_positioners.remove(&ctx.proxy);
-        }
-        Request::SetSize(args) => {
-            let w = u32::try_from(args.width)
-                .ok()
-                .and_then(NonZeroU32::new)
-                .ok_or_else(|| io::Error::other("positioner: invalid size"))?;
-            let h = u32::try_from(args.height)
-                .ok()
-                .and_then(NonZeroU32::new)
-                .ok_or_else(|| io::Error::other("positioner: invalid size"))?;
-            positioner.size = Some((w, h));
-        }
-        Request::SetAnchorRect(args) => {
-            positioner.anchor_rect = Some((args.x, args.y, args.width, args.height));
-        }
-        Request::SetAnchor(anchor) => {
-            positioner.anchor = Some(anchor);
-        }
-        Request::SetGravity(gravity) => {
-            positioner.gravity = Some(gravity);
-        }
-        Request::SetConstraintAdjustment(adjustment) => {
-            positioner.contraint_adjustment = adjustment;
-        }
-        Request::SetOffset(args) => {
-            positioner.offset = (args.x, args.y);
-        }
-        Request::SetReactive => {
-            positioner.reactive = true;
-        }
-        Request::SetParentSize(_) => todo!(),
-        Request::SetParentConfigure(_) => todo!(),
     }
     Ok(())
 }

@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use globals::single_pixel_buffer::SinglePixelBufferManager;
+use globals::xdg_shell::popup::XdgPopupRole;
 use xkbcommon::xkb;
 
 mod backend;
@@ -66,6 +67,7 @@ pub struct State {
     pub seat: Seat,
     pub cursor: Cursor,
     pub focus_stack: FocusStack,
+    pub popup_stack: Vec<Rc<XdgPopupRole>>,
     pub debugger: Debugger,
 }
 
@@ -99,6 +101,9 @@ impl Server {
         self.state.globals.remove_client(client_id);
         self.state.seat.remove_client(client_id);
         self.state.focus_stack.remove_client(client_id);
+        self.state
+            .popup_stack
+            .retain(|x| x.wl.client_id() != client_id);
         self.state.debugger.remove_client(client_id);
         let client = self.clients.remove(&client_id).unwrap();
         client
@@ -151,6 +156,7 @@ impl Server {
                 cursor,
                 seat: Seat::new(),
                 focus_stack: FocusStack::default(),
+                popup_stack: Vec::new(),
                 debugger: Debugger::default(),
             },
         }
@@ -172,6 +178,25 @@ fn render_surface(frame: &mut dyn Frame, surf: &Surface, alpha: f32, x: i32, y: 
     for sub in &surf.cur.borrow().subsurfaces.clone() {
         let position = sub.position;
         render_surface(frame, &sub.surface, alpha, x + position.0, y + position.1);
+    }
+    if let Some(xdg) = surf.get_xdg_surface() {
+        if let Some(popup) = &*xdg.popup.borrow() {
+            let parent = popup.parent.upgrade().unwrap();
+            let parent_geom = parent.get_window_geometry().unwrap();
+            let geom = popup
+                .xdg_surface
+                .upgrade()
+                .unwrap()
+                .get_window_geometry()
+                .unwrap();
+            render_surface(
+                frame,
+                &popup.wl_surface.upgrade().unwrap(),
+                alpha,
+                x + parent_geom.x + popup.x.get() - geom.x,
+                y + parent_geom.y + popup.y.get() - geom.y,
+            );
+        }
     }
 }
 
@@ -359,7 +384,13 @@ impl Server {
                             .backend
                             .switch_vt(keysym.raw() - xkb::Keysym::XF86_Switch_VT_1.raw() + 1);
                     } else {
-                        if let Some(toplevel) = self.state.focus_stack.top() {
+                        if let Some(popup) =
+                            self.state.popup_stack.iter().rev().find(|p| p.grab.get())
+                        {
+                            self.state.seat.kbd_focus_surface(Some(
+                                popup.wl_surface.upgrade().unwrap().wl.clone(),
+                            ));
+                        } else if let Some(toplevel) = self.state.focus_stack.top() {
                             self.state.seat.kbd_focus_surface(Some(
                                 toplevel.wl_surface.upgrade().unwrap().wl.clone(),
                             ));
@@ -368,7 +399,12 @@ impl Server {
                     }
                 }
                 BackendEvent::KeyReleased(_id, key) => {
-                    if let Some(toplevel) = self.state.focus_stack.top() {
+                    if let Some(popup) = self.state.popup_stack.iter().rev().find(|p| p.grab.get())
+                    {
+                        self.state.seat.kbd_focus_surface(Some(
+                            popup.wl_surface.upgrade().unwrap().wl.clone(),
+                        ));
+                    } else if let Some(toplevel) = self.state.focus_stack.top() {
                         self.state.seat.kbd_focus_surface(Some(
                             toplevel.wl_surface.upgrade().unwrap().wl.clone(),
                         ));

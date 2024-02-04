@@ -8,8 +8,8 @@ use crate::backend::{Backend, BufferId};
 use crate::buffer_transform::BufferTransform;
 use crate::client::RequestCtx;
 use crate::globals::{GlobalsManager, IsGlobal};
-use crate::wayland_core::Proxy;
-use crate::{protocol::*, Fixed};
+use crate::protocol::*;
+use crate::wayland_core::{Fixed, Proxy};
 use crate::{Client, State};
 
 #[derive(Default)]
@@ -19,8 +19,9 @@ pub struct Compositor {
     pub subsurfaces: HashMap<WlSubsurface, Rc<SubsurfaceRole>>,
     pub xdg_surfaces: HashMap<XdgSurface, Rc<xdg_shell::XdgSurfaceRole>>,
     pub xdg_toplevels: HashMap<XdgToplevel, Rc<xdg_shell::toplevel::XdgToplevelRole>>,
-    pub xdg_positioners: HashMap<XdgPositioner, xdg_shell::Positioner>,
-    pub viewporters: HashMap<WpViewport, Weak<Surface>>,
+    pub xdg_popups: HashMap<XdgPopup, Rc<xdg_shell::popup::XdgPopupRole>>,
+    pub xdg_positioners: HashMap<XdgPositioner, xdg_shell::positioner::RawPositioner>,
+    pub viewporters: HashMap<WpViewport, Rc<Surface>>,
 }
 
 impl Compositor {
@@ -57,12 +58,12 @@ pub struct Surface {
     pub role: RefCell<SurfaceRole>,
     pub cur: RefCell<SurfaceState>,
     pending: RefCell<SurfaceState>,
-    pending_buffer: RefCell<Option<WlBuffer>>,
+    pending_buffer: Cell<Option<WlBuffer>>,
     viewport: Cell<Option<WpViewport>>,
     buf_transform: Cell<Option<BufferTransform>>,
 }
 
-#[derive(Default, Clone)]
+#[derive(Default)]
 pub struct SurfaceState {
     pub mask: CommitedMask,
 
@@ -167,7 +168,7 @@ impl Surface {
             role: RefCell::new(SurfaceRole::None),
             cur: RefCell::new(SurfaceState::default()),
             pending: RefCell::new(SurfaceState::default()),
-            pending_buffer: RefCell::new(None),
+            pending_buffer: Cell::new(None),
             viewport: Cell::new(None),
             buf_transform: Cell::new(None),
         }
@@ -214,34 +215,68 @@ impl Surface {
         Some(bbox)
     }
 
-    pub fn get_pos(self: &Rc<Self>) -> Option<(i32, i32)> {
-        let mut s = self.clone();
-        let mut sub_x = 0;
-        let mut sub_y = 0;
-        while let Some(sub) = s.get_subsurface() {
-            let parent = sub.parent.upgrade().unwrap();
-            let (px, py) = parent
-                .cur
-                .borrow()
-                .subsurfaces
-                .iter()
-                .find(|node| node.surface.wl == s.wl)?
-                .position;
-            sub_x += px;
-            sub_y += py;
-            s = parent;
-        }
-        if let Some(xdg) = s.get_xdg_surface() {
-            if let Some(toplevel) = xdg.get_toplevel() {
-                if let Some(geom) = xdg.get_window_geometry() {
-                    return Some((
-                        toplevel.x.get() + sub_x - geom.x,
-                        toplevel.y.get() + sub_y - geom.y,
-                    ));
-                }
+    pub fn get_pos(&self) -> Option<(i32, i32)> {
+        match &*self.role.borrow() {
+            SurfaceRole::None => None,
+            SurfaceRole::Cursor => None,
+            SurfaceRole::Subsurface(sub) => {
+                let parent = sub.parent.upgrade().unwrap();
+                let (px, py) = parent
+                    .cur
+                    .borrow()
+                    .subsurfaces
+                    .iter()
+                    .find(|node| node.surface.wl == self.wl)?
+                    .position;
+                parent.get_pos().map(|(x, y)| (x + px, y + py))
             }
+            SurfaceRole::Xdg(xdg) => match &*xdg.specific.borrow() {
+                xdg_shell::SpecificRole::None => None,
+                xdg_shell::SpecificRole::Toplevel(toplevel) => xdg
+                    .get_window_geometry()
+                    .map(|geom| (toplevel.x.get() - geom.x, toplevel.y.get() - geom.y)),
+                xdg_shell::SpecificRole::Popup(popup) => {
+                    let parent = popup.parent.upgrade().unwrap();
+                    let (parent_x, parent_y) = parent.wl_surface.upgrade().unwrap().get_pos()?;
+                    let parent_geom = parent.get_window_geometry()?;
+                    let popup_geom = popup.xdg_surface.upgrade().unwrap().get_window_geometry()?;
+                    dbg!(Some((
+                        parent_x + parent_geom.x + popup.x.get() - popup_geom.x,
+                        parent_y + parent_geom.y + popup.y.get() - popup_geom.y,
+                    )))
+                }
+            },
         }
-        None
+
+        // if let Some(xdg) = s.get_xdg_surface() {
+        //     match &*xdg.specific.borrow() {
+        //         xdg_shell::SpecificRole::None => (),
+        //         xdg_shell::SpecificRole::Toplevel(toplevel) => {
+        //             if let Some(geom) = xdg.get_window_geometry() {
+        //                 return Some((
+        //                     toplevel.x.get() + sub_x - geom.x,
+        //                     toplevel.y.get() + sub_y - geom.y,
+        //                 ));
+        //             }
+        //         }
+        //         xdg_shell::SpecificRole::Popup(popup) => {
+        //             let parent = popup.parent.upgrade().unwrap();
+        //             if let Some(geom) = popup.xdg_surface.upgrade().unwrap().get_window_geometry() {
+        //                 return Some((
+        //                     toplevel.x.get() + sub_x - geom.x,
+        //                     toplevel.y.get() + sub_y - geom.y,
+        //                 ));
+        //             }
+        //         }
+        //     }
+        //     // eprintln!("yes");
+        //     // if let Some(toplevel) = xdg.get_toplevel() {
+        //     //     eprintln!("yes!!!");
+        //     // } else {
+        //     //     eprintln!("noooo");
+        //     // }
+        // }
+        // None
     }
 
     pub fn effective_is_sync(&self) -> bool {
@@ -269,6 +304,13 @@ impl Surface {
     pub fn get_xdg_surface(&self) -> Option<Rc<xdg_shell::XdgSurfaceRole>> {
         match &*self.role.borrow() {
             SurfaceRole::Xdg(xdg) => Some(xdg.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn get_xdg_toplevel(&self) -> Option<Rc<xdg_shell::toplevel::XdgToplevelRole>> {
+        match &*self.role.borrow() {
+            SurfaceRole::Xdg(xdg) => xdg.get_toplevel(),
             _ => None,
         }
     }
@@ -388,7 +430,7 @@ impl IsGlobal for WpViewporter {
                     ctx.client
                         .compositor
                         .viewporters
-                        .insert(args.id, Rc::downgrade(surf));
+                        .insert(args.id, surf.clone());
                 }
             }
             Ok(())
@@ -423,7 +465,7 @@ fn wl_surface_cb(ctx: RequestCtx<WlSurface>) -> io::Result<()> {
             }
             assert_eq!(args.x, 0, "unimplemented");
             assert_eq!(args.y, 0, "unimplemented");
-            *surface.pending_buffer.borrow_mut() = args.buffer;
+            surface.pending_buffer.set(args.buffer);
             surface
                 .pending
                 .borrow_mut()
@@ -619,8 +661,7 @@ fn wp_viewport_cb(ctx: RequestCtx<WpViewport>) -> io::Result<()> {
         .compositor
         .viewporters
         .get(&ctx.proxy)
-        .unwrap()
-        .upgrade()
+        .cloned()
         .ok_or_else(|| io::Error::other("viweport: surface is dead"))?;
     let mut pending = surf.pending.borrow_mut();
 

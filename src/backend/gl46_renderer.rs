@@ -223,7 +223,9 @@ impl RendererStateImp {
 
     fn consider_dropping_buffer(&mut self, buffer_id: BufferId) {
         let buffer = self.textures.get(&buffer_id).unwrap();
-        assert_eq!(buffer.locks, 0);
+        if buffer.locks > 0 {
+            return;
+        }
         match &buffer.kind {
             TextureKind::Gl(buffer) => {
                 if let Some(resource) = &buffer.resource {

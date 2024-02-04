@@ -21,6 +21,24 @@ pub struct SurfaceUnderCursor {
 impl FocusStack {
     pub fn surface_at(&self, x: f32, y: f32) -> Option<SurfaceUnderCursor> {
         fn surface_at(surf: Rc<Surface>, x: f32, y: f32) -> Option<(Rc<Surface>, f32, f32)> {
+            if let Some(xdg) = surf.get_xdg_surface() {
+                if let Some(popup) = &*xdg.popup.borrow() {
+                    let par_geom = xdg.get_window_geometry().unwrap();
+                    let pop_geom = popup
+                        .xdg_surface
+                        .upgrade()
+                        .unwrap()
+                        .get_window_geometry()
+                        .unwrap();
+                    if let Some(res) = surface_at(
+                        popup.wl_surface.upgrade().unwrap(),
+                        x - (popup.x.get() + par_geom.x - pop_geom.x) as f32,
+                        y - (popup.y.get() + par_geom.y - pop_geom.y) as f32,
+                    ) {
+                        return Some(res);
+                    }
+                }
+            }
             for subs in surf.cur.borrow().subsurfaces.iter().rev() {
                 if let Some(res) = surface_at(
                     subs.surface.clone(),

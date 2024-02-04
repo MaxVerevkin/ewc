@@ -7,8 +7,8 @@ use std::rc::{Rc, Weak};
 use crate::client::RequestCtx;
 use crate::globals::compositor::{MapState, Surface};
 use crate::protocol::xdg_toplevel::ResizeEdge;
-use crate::protocol::*;
 use crate::State;
+use crate::{protocol::*, Proxy};
 
 use super::{SpecificRole, XdgSurfaceRole};
 
@@ -43,6 +43,7 @@ struct ToplevelConfigure {
 
 impl XdgToplevelRole {
     pub fn new(xdg_toplevel: XdgToplevel, xdg_surface: &Rc<XdgSurfaceRole>) -> Self {
+        xdg_toplevel.set_callback(xdg_toplevel_cb);
         Self {
             wl: xdg_toplevel,
             xdg_surface: Rc::downgrade(xdg_surface),
@@ -180,14 +181,14 @@ impl XdgToplevelRole {
                     return Err(io::Error::other("unmapped surface commited a buffer"));
                 }
                 let serial = self.cur_configure.get().serial + 1;
-                self.wl.configure(400, 200, Vec::new());
+                self.wl.configure(0, 0, Vec::new());
                 xdg_surface.wl.configure(serial);
                 self.map_state.set(MapState::WaitingFirstBuffer);
                 self.pending_configure.set(None);
                 self.cur_configure.set(ToplevelConfigure {
                     serial,
-                    width: 400,
-                    heinght: 200,
+                    width: 0,
+                    heinght: 0,
                     activated: false,
                 });
             }
@@ -239,7 +240,7 @@ pub struct XdgToplevelState {
     pub max_size: Option<(u32, u32)>,
 }
 
-pub(super) fn xdg_toplevel_cb(ctx: RequestCtx<XdgToplevel>) -> io::Result<()> {
+fn xdg_toplevel_cb(ctx: RequestCtx<XdgToplevel>) -> io::Result<()> {
     let toplevel = ctx.client.compositor.xdg_toplevels.get(&ctx.proxy).unwrap();
 
     use xdg_toplevel::Request;
@@ -255,7 +256,9 @@ pub(super) fn xdg_toplevel_cb(ctx: RequestCtx<XdgToplevel>) -> io::Result<()> {
             ctx.client.compositor.xdg_toplevels.remove(&ctx.proxy);
         }
         Request::SetParent(parent) => {
-            assert_eq!(parent, None, "unimplemented");
+            if parent.is_some() {
+                eprintln!("set_parent is ignored");
+            }
         }
         Request::SetTitle(title) => {
             toplevel.dirty_title.set(true);

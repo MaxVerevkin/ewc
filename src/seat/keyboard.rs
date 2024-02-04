@@ -126,7 +126,7 @@ impl Keyboard {
         }
     }
 
-    pub fn unfocus_surface(&mut self, wl_surface: &WlSurface) {
+    pub(super) fn unfocus_surface(&mut self, wl_surface: &WlSurface) {
         if self.focused_surface.as_ref() == Some(wl_surface) {
             self.focus_surface(None);
         }
