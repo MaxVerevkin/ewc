@@ -263,14 +263,9 @@ impl Surface {
     }
 
     pub fn effective_is_sync(&self) -> bool {
-        if let Some(subsurface) = self.get_subsurface() {
-            match subsurface.is_sync.get() {
-                true => true,
-                false => subsurface.parent.upgrade().unwrap().effective_is_sync(),
-            }
-        } else {
-            false
-        }
+        self.get_subsurface().is_some_and(|sub| {
+            sub.is_sync.get() || sub.parent.upgrade().unwrap().effective_is_sync()
+        })
     }
 
     pub fn has_role(&self) -> bool {
@@ -438,6 +433,9 @@ fn wl_surface_cb(ctx: RequestCtx<WlSurface>) -> io::Result<()> {
                 SurfaceRole::None | SurfaceRole::Cursor,
             ) {
                 return Err(io::Error::other("destroying wl_surface before role object"));
+            }
+            for sub in &surface.pending.borrow().subsurfaces {
+                sub.surface.unmap(ctx.state);
             }
         }
         Request::Attach(args) => {
