@@ -185,6 +185,7 @@ fn xdg_popup_cb(ctx: RequestCtx<XdgPopup>) -> io::Result<()> {
         .get(&ctx.proxy)
         .unwrap()
         .clone();
+    let surface = popup.wl_surface.upgrade().unwrap();
 
     use xdg_popup::Request;
     match ctx.request {
@@ -193,9 +194,7 @@ fn xdg_popup_cb(ctx: RequestCtx<XdgPopup>) -> io::Result<()> {
             *parent.popup.borrow_mut() = None;
             *popup.xdg_surface.upgrade().unwrap().specific.borrow_mut() = SpecificRole::None;
             ctx.client.compositor.xdg_popups.remove(&ctx.proxy);
-            ctx.state
-                .seat
-                .unfocus_surface(&popup.wl_surface.upgrade().unwrap().wl);
+            surface.unmap(ctx.state);
             if !ctx
                 .state
                 .popup_stack
@@ -208,9 +207,7 @@ fn xdg_popup_cb(ctx: RequestCtx<XdgPopup>) -> io::Result<()> {
         }
         Request::Grab(_args) => {
             popup.grab.set(true);
-            ctx.state
-                .seat
-                .kbd_focus_surface(Some(popup.wl_surface.upgrade().unwrap().wl.clone()));
+            ctx.state.seat.kbd_focus_surface(Some(surface.wl.clone()));
         }
         Request::Reposition(args) => {
             ctx.proxy.repositioned(args.token);
