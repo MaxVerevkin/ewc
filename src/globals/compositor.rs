@@ -547,11 +547,12 @@ fn wl_surface_cb(ctx: RequestCtx<WlSurface>) -> io::Result<()> {
 
 fn wl_subsurface_cb(ctx: RequestCtx<WlSubsurface>) -> io::Result<()> {
     let subsurface = ctx.client.compositor.subsurfaces.get(&ctx.proxy).unwrap();
+    let surface = subsurface.surface.upgrade().unwrap();
 
     use wl_subsurface::Request;
     match ctx.request {
         Request::Destroy => {
-            *subsurface.surface.upgrade().unwrap().role.borrow_mut() = SurfaceRole::None;
+            *surface.role.borrow_mut() = SurfaceRole::None;
             let subsurface = ctx
                 .client
                 .compositor
@@ -563,53 +564,69 @@ fn wl_subsurface_cb(ctx: RequestCtx<WlSubsurface>) -> io::Result<()> {
                     .cur
                     .borrow_mut()
                     .subsurfaces
-                    .retain(|node| node.surface.wl != subsurface.surface.upgrade().unwrap().wl);
+                    .retain(|node| node.surface.wl != surface.wl);
                 parent
                     .pending
                     .borrow_mut()
                     .subsurfaces
-                    .retain(|node| node.surface.wl != subsurface.surface.upgrade().unwrap().wl);
+                    .retain(|node| node.surface.wl != surface.wl);
                 if let Some(parent_sub) = parent.get_subsurface() {
                     parent_sub
                         .cached_state
                         .borrow_mut()
                         .subsurfaces
-                        .retain(|node| node.surface.wl != subsurface.surface.upgrade().unwrap().wl);
+                        .retain(|node| node.surface.wl != surface.wl);
                 }
             }
         }
         Request::SetPosition(args) => {
-            subsurface
-                .parent
-                .upgrade()
-                .unwrap()
-                .pending
-                .borrow_mut()
+            let parent = subsurface.parent.upgrade().unwrap();
+            let mut parent_pending = parent.pending.borrow_mut();
+            parent_pending
                 .subsurfaces
                 .iter_mut()
-                .find(|n| n.surface.wl == subsurface.surface.upgrade().unwrap().wl)
+                .find(|n| n.surface.wl == surface.wl)
                 .unwrap()
                 .position = (args.x, args.y);
-            subsurface
-                .parent
-                .upgrade()
-                .unwrap()
-                .pending
-                .borrow_mut()
-                .mask
-                .set(CommittedMaskBit::Subsurfaces)
+            parent_pending.mask.set(CommittedMaskBit::Subsurfaces)
         }
-        Request::PlaceAbove(_) => todo!(),
-        Request::PlaceBelow(_) => todo!(),
+        Request::PlaceAbove(sibling) => {
+            let parent = subsurface.parent.upgrade().unwrap();
+            let mut parent_pending = parent.pending.borrow_mut();
+            let old_i = parent_pending
+                .subsurfaces
+                .iter()
+                .position(|x| x.surface.wl == surface.wl)
+                .unwrap();
+            let node = parent_pending.subsurfaces.remove(old_i);
+            let sibling_i = parent_pending
+                .subsurfaces
+                .iter()
+                .position(|x| x.surface.wl == sibling)
+                .ok_or_else(|| io::Error::other("place_above: surface not a sibling"))?;
+            parent_pending.subsurfaces.insert(sibling_i + 1, node);
+        }
+        Request::PlaceBelow(sibling) => {
+            let parent = subsurface.parent.upgrade().unwrap();
+            let mut parent_pending = parent.pending.borrow_mut();
+            let old_i = parent_pending
+                .subsurfaces
+                .iter()
+                .position(|x| x.surface.wl == surface.wl)
+                .unwrap();
+            let node = parent_pending.subsurfaces.remove(old_i);
+            let sibling_i = parent_pending
+                .subsurfaces
+                .iter()
+                .position(|x| x.surface.wl == sibling)
+                .ok_or_else(|| io::Error::other("place_above: surface not a sibling"))?;
+            parent_pending.subsurfaces.insert(sibling_i, node);
+        }
         Request::SetSync => subsurface.is_sync.set(true),
         Request::SetDesync => {
             subsurface.is_sync.set(false);
             if subsurface.parent.upgrade().unwrap().effective_is_sync() {
-                subsurface
-                    .surface
-                    .upgrade()
-                    .unwrap()
-                    .apply_cache(ctx.state)?;
+                surface.apply_cache(ctx.state)?;
             }
         }
     }
