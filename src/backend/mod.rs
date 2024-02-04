@@ -23,7 +23,7 @@ pub trait Backend {
     fn next_event(&mut self) -> Option<BackendEvent>;
     fn switch_vt(&mut self, vt: u32);
     fn renderer_state(&mut self) -> &mut dyn RendererState;
-    fn render_frame(&mut self, f: &mut dyn FnMut(&mut dyn Frame));
+    fn render_frame(&mut self, clear: Color, render_list: &[RenderNode]);
 }
 
 pub trait RendererState: Any {
@@ -55,7 +55,7 @@ impl InputTimestamp {
     }
 }
 
-pub trait Frame {
+trait Frame {
     fn time(&self) -> u32;
     fn width(&self) -> u32;
     fn height(&self) -> u32;
@@ -69,6 +69,27 @@ pub trait Frame {
         y: i32,
     );
     fn render_rect(&mut self, color: Color, rect: pixman::Rectangle32);
+
+    fn render(&mut self, render_list: &[RenderNode]) {
+        for node in render_list {
+            match node {
+                RenderNode::Rect(rect, color) => self.render_rect(*color, *rect),
+                RenderNode::Buffer {
+                    x,
+                    y,
+                    opaque_region,
+                    alpha,
+                    buf_transform,
+                    frame_callbacks,
+                } => {
+                    self.render_buffer(opaque_region.as_ref(), *alpha, *buf_transform, *x, *y);
+                    for cb in frame_callbacks {
+                        cb.done(self.time());
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -131,6 +152,18 @@ pub enum BackendEvent {
     PointerBtnRelease(PointerId, InputTimestamp, u32),
     PointerAxisVertial(PointerId, InputTimestamp, f32),
     PointerRemoved(PointerId),
+}
+
+pub enum RenderNode {
+    Rect(pixman::Rectangle32, Color),
+    Buffer {
+        x: i32,
+        y: i32,
+        opaque_region: Option<pixman::Region32>,
+        alpha: f32,
+        buf_transform: BufferTransform,
+        frame_callbacks: Vec<protocol::WlCallback>,
+    },
 }
 
 #[must_use]

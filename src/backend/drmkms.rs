@@ -569,7 +569,7 @@ impl Backend for BackendImp {
         }
     }
 
-    fn render_frame(&mut self, f: &mut dyn FnMut(&mut dyn Frame)) {
+    fn render_frame(&mut self, clear: Color, render_list: &[RenderNode]) {
         if self.suspended {
             return;
         }
@@ -586,7 +586,10 @@ impl Backend for BackendImp {
                 let (width, height) = swapchain[0].size();
                 const FORMAT: wl_shm::Format = wl_shm::Format::Xrgb8888;
 
-                f(state.frame(temp_buf, width, height, FORMAT).as_mut());
+                let mut frame = state.frame(temp_buf, width, height, FORMAT);
+                frame.clear(clear.r, clear.g, clear.a);
+                frame.render(render_list);
+                drop(frame);
 
                 // Reading from mapped buffer is terribly slow, but required for blending.
                 // When blending is involved, rendering to a CPU buffer and then copying is much faster.
@@ -606,7 +609,10 @@ impl Backend for BackendImp {
             } => {
                 self.fb_swapchain.swap(0, 1);
                 swapchain.swap(0, 1);
-                f(state.frame(*width, *height, &swapchain[1]).as_mut());
+                let mut frame = state.frame(*width, *height, &swapchain[1]);
+                frame.clear(clear.r, clear.g, clear.b);
+                frame.render(render_list);
+                drop(frame);
                 state.finish_frame();
             }
         }

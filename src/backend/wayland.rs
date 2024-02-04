@@ -110,7 +110,7 @@ impl Backend for BackendImp {
         }
     }
 
-    fn render_frame(&mut self, f: &mut dyn FnMut(&mut dyn Frame)) {
+    fn render_frame(&mut self, clear: Color, render_list: &[RenderNode]) {
         assert!(self.state.mapped);
         assert!(self.state.throttle_cb.is_none());
 
@@ -133,14 +133,14 @@ impl Backend for BackendImp {
                         format: wl_shm::Format::Argb8888,
                     },
                 );
-                f(state
-                    .frame(
-                        canvas,
-                        self.state.width,
-                        self.state.height,
-                        crate::protocol::wl_shm::Format::Argb8888,
-                    )
-                    .as_mut());
+                let mut frame = state.frame(
+                    canvas,
+                    self.state.width,
+                    self.state.height,
+                    crate::protocol::wl_shm::Format::Argb8888,
+                );
+                frame.clear(clear.r, clear.g, clear.b);
+                frame.render(render_list);
                 self.state
                     .wl_surface
                     .attach(&mut self.conn, Some(buffer.into_wl_buffer()), 0, 0);
@@ -202,7 +202,10 @@ impl Backend for BackendImp {
                 };
                 assert!(!buf.in_use);
 
-                f(state.frame(sw.width, sw.height, &buf.fb).as_mut());
+                let mut frame = state.frame(sw.width, sw.height, &buf.fb);
+                frame.clear(clear.r, clear.g, clear.b);
+                frame.render(render_list);
+                drop(frame);
                 state.finish_frame();
 
                 buf.in_use = true;

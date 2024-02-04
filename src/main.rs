@@ -32,7 +32,7 @@ mod protocol;
 mod seat;
 mod wayland_core;
 
-use crate::backend::{Backend, BackendEvent, Color, Frame};
+use crate::backend::{Backend, BackendEvent, Color, RenderNode};
 use crate::client::{Client, ClientId};
 use crate::cursor::Cursor;
 use crate::event_loop::EventLoop;
@@ -169,21 +169,26 @@ impl Server {
     }
 }
 
-fn render_surface(frame: &mut dyn Frame, surf: &Surface, alpha: f32, x: i32, y: i32) {
-    for frame_cb in surf.cur.borrow_mut().frame_cbs.drain(..) {
-        frame_cb.done(frame.time());
-    }
+fn render_surface(render_list: &mut Vec<RenderNode>, surf: &Surface, alpha: f32, x: i32, y: i32) {
     let Some(buf_transform) = surf.buf_transform() else { return };
-    frame.render_buffer(
-        surf.cur.borrow().opaque_region.as_ref(),
-        alpha,
-        buf_transform,
+    let mut cur = surf.cur.borrow_mut();
+    render_list.push(RenderNode::Buffer {
         x,
         y,
-    );
-    for sub in &surf.cur.borrow().subsurfaces.clone() {
+        opaque_region: cur.opaque_region.clone(),
+        alpha,
+        buf_transform,
+        frame_callbacks: std::mem::take(&mut cur.frame_cbs),
+    });
+    for sub in &cur.subsurfaces.clone() {
         let position = sub.position;
-        render_surface(frame, &sub.surface, alpha, x + position.0, y + position.1);
+        render_surface(
+            render_list,
+            &sub.surface,
+            alpha,
+            x + position.0,
+            y + position.1,
+        );
     }
     if let Some(xdg) = surf.get_xdg_surface() {
         if let Some(popup) = &*xdg.popup.borrow() {
@@ -196,7 +201,7 @@ fn render_surface(frame: &mut dyn Frame, surf: &Surface, alpha: f32, x: i32, y: 
                 .get_window_geometry()
                 .unwrap();
             render_surface(
-                frame,
+                render_list,
                 &popup.wl_surface.upgrade().unwrap(),
                 alpha,
                 x + parent_geom.x + popup.x.get() - geom.x,
@@ -294,82 +299,89 @@ impl Server {
             match event {
                 BackendEvent::ShutDown => return Err(io::Error::other("backend shutdown")),
                 BackendEvent::Frame => {
-                    debug!(self.state.debugger, "got a frame event!");
                     let t = std::time::Instant::now();
-                    self.state.backend.render_frame(&mut |frame| {
-                        frame.clear(0.2, 0.1, 0.2);
-                        for (toplevel_i, toplevel) in
-                            self.state.focus_stack.inner().iter().enumerate()
-                        {
-                            let toplevel = toplevel.upgrade().unwrap();
-                            let xdg_surface = toplevel.xdg_surface.upgrade().unwrap();
-                            let alpha = if toplevel_i == self.state.focus_stack.inner().len() - 1 {
-                                1.0
-                            } else {
-                                0.8
-                            };
-                            if let Some(geom) = xdg_surface.get_window_geometry() {
-                                let border_color =
-                                    if toplevel_i == self.state.focus_stack.inner().len() - 1 {
-                                        Color::from_rgba(1.0, 0.0, 0.0, 1.0)
-                                    } else {
-                                        Color::from_rgba(0.2, 0.2, 0.2, 1.0) * alpha
-                                    };
-                                frame.render_rect(
-                                    border_color,
-                                    pixman::Rectangle32 {
-                                        x: toplevel.x.get() - 2,
-                                        y: toplevel.y.get() - 2,
-                                        width: 2,
-                                        height: geom.height.get() + 4,
-                                    },
-                                );
-                                frame.render_rect(
-                                    border_color,
-                                    pixman::Rectangle32 {
-                                        x: toplevel.x.get() + geom.width.get() as i32,
-                                        y: toplevel.y.get() - 2,
-                                        width: 2,
-                                        height: geom.height.get() + 4,
-                                    },
-                                );
-                                frame.render_rect(
-                                    border_color,
-                                    pixman::Rectangle32 {
-                                        x: toplevel.x.get(),
-                                        y: toplevel.y.get() - 2,
-                                        width: geom.width.get(),
-                                        height: 2,
-                                    },
-                                );
-                                frame.render_rect(
-                                    border_color,
-                                    pixman::Rectangle32 {
-                                        x: toplevel.x.get(),
-                                        y: toplevel.y.get() + geom.height.get() as i32,
-                                        width: geom.width.get(),
-                                        height: 2,
-                                    },
-                                );
-                                render_surface(
-                                    frame,
-                                    &xdg_surface.wl_surface.upgrade().unwrap(),
-                                    alpha,
-                                    toplevel.x.get() - geom.x,
-                                    toplevel.y.get() - geom.y,
-                                );
-                            }
-                        }
-                        if let Some((buf_transform, hx, hy)) = self.state.cursor.get_buffer() {
-                            frame.render_buffer(
-                                None,
-                                1.0,
-                                buf_transform,
-                                self.state.seat.pointer.x.round() as i32 - hx,
-                                self.state.seat.pointer.y.round() as i32 - hy,
+                    let mut render_list = Vec::new();
+                    for (toplevel_i, toplevel) in self.state.focus_stack.inner().iter().enumerate()
+                    {
+                        let toplevel = toplevel.upgrade().unwrap();
+                        let xdg_surface = toplevel.xdg_surface.upgrade().unwrap();
+                        let alpha = if toplevel_i == self.state.focus_stack.inner().len() - 1 {
+                            1.0
+                        } else {
+                            0.8
+                        };
+                        if let Some(geom) = xdg_surface.get_window_geometry() {
+                            let border_color =
+                                if toplevel_i == self.state.focus_stack.inner().len() - 1 {
+                                    Color::from_rgba(1.0, 0.0, 0.0, 1.0)
+                                } else {
+                                    Color::from_rgba(0.2, 0.2, 0.2, 1.0) * alpha
+                                };
+                            render_list.push(RenderNode::Rect(
+                                pixman::Rectangle32 {
+                                    x: toplevel.x.get() - 2,
+                                    y: toplevel.y.get() - 2,
+                                    width: 2,
+                                    height: geom.height.get() + 4,
+                                },
+                                border_color,
+                            ));
+                            render_list.push(RenderNode::Rect(
+                                pixman::Rectangle32 {
+                                    x: toplevel.x.get() + geom.width.get() as i32,
+                                    y: toplevel.y.get() - 2,
+                                    width: 2,
+                                    height: geom.height.get() + 4,
+                                },
+                                border_color,
+                            ));
+                            render_list.push(RenderNode::Rect(
+                                pixman::Rectangle32 {
+                                    x: toplevel.x.get(),
+                                    y: toplevel.y.get() - 2,
+                                    width: geom.width.get(),
+                                    height: 2,
+                                },
+                                border_color,
+                            ));
+                            render_list.push(RenderNode::Rect(
+                                pixman::Rectangle32 {
+                                    x: toplevel.x.get(),
+                                    y: toplevel.y.get() + geom.height.get() as i32,
+                                    width: geom.width.get(),
+                                    height: 2,
+                                },
+                                border_color,
+                            ));
+                            render_surface(
+                                &mut render_list,
+                                &xdg_surface.wl_surface.upgrade().unwrap(),
+                                alpha,
+                                toplevel.x.get() - geom.x,
+                                toplevel.y.get() - geom.y,
                             );
                         }
-                    });
+                    }
+                    if let Some((buf_transform, hx, hy)) = self.state.cursor.get_buffer() {
+                        render_list.push(RenderNode::Buffer {
+                            x: self.state.seat.pointer.x.round() as i32 - hx,
+                            y: self.state.seat.pointer.y.round() as i32 - hy,
+                            opaque_region: None,
+                            alpha: 1.0,
+                            buf_transform,
+                            frame_callbacks: Vec::new(),
+                        });
+                    }
+                    debug!(
+                        self.state.debugger,
+                        "prepared render list of {} nodes in {:?}",
+                        render_list.len(),
+                        t.elapsed()
+                    );
+                    let t = std::time::Instant::now();
+                    self.state
+                        .backend
+                        .render_frame(Color::from_rgba(0.2, 0.1, 0.2, 1.0), &render_list);
                     self.state.debugger.frame(t.elapsed());
                 }
                 BackendEvent::NewKeyboard(_id) => (),
