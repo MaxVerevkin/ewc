@@ -379,9 +379,15 @@ impl Server {
                         t.elapsed()
                     );
                     let t = std::time::Instant::now();
-                    self.state
-                        .backend
-                        .render_frame(Color::from_rgba(0.2, 0.1, 0.2, 1.0), &render_list);
+                    let time = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis() as u32;
+                    self.state.backend.render_frame(
+                        Color::from_rgba(0.2, 0.1, 0.2, 1.0),
+                        &render_list,
+                        time,
+                    );
                     self.state.debugger.frame(t.elapsed());
                 }
                 BackendEvent::NewKeyboard(_id) => (),

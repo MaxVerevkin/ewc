@@ -23,7 +23,7 @@ pub trait Backend {
     fn next_event(&mut self) -> Option<BackendEvent>;
     fn switch_vt(&mut self, vt: u32);
     fn renderer_state(&mut self) -> &mut dyn RendererState;
-    fn render_frame(&mut self, clear: Color, render_list: &[RenderNode]);
+    fn render_frame(&mut self, clear: Color, render_list: &[RenderNode], time: u32);
 }
 
 pub trait RendererState: Any {
@@ -56,9 +56,6 @@ impl InputTimestamp {
 }
 
 trait Frame {
-    fn time(&self) -> u32;
-    fn width(&self) -> u32;
-    fn height(&self) -> u32;
     fn clear(&mut self, r: f32, g: f32, b: f32);
     fn render_buffer(
         &mut self,
@@ -70,7 +67,7 @@ trait Frame {
     );
     fn render_rect(&mut self, color: Color, rect: pixman::Rectangle32);
 
-    fn render(&mut self, render_list: &[RenderNode]) {
+    fn render(&mut self, render_list: &[RenderNode], time: u32) {
         for node in render_list {
             match node {
                 RenderNode::Rect(rect, color) => self.render_rect(*color, *rect),
@@ -84,7 +81,7 @@ trait Frame {
                 } => {
                     self.render_buffer(opaque_region.as_ref(), *alpha, *buf_transform, *x, *y);
                     for cb in frame_callbacks {
-                        cb.done(self.time());
+                        cb.done(time);
                     }
                 }
             }

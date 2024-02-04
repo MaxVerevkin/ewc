@@ -110,7 +110,7 @@ impl Backend for BackendImp {
         }
     }
 
-    fn render_frame(&mut self, clear: Color, render_list: &[RenderNode]) {
+    fn render_frame(&mut self, clear: Color, render_list: &[RenderNode], time: u32) {
         assert!(self.state.mapped);
         assert!(self.state.throttle_cb.is_none());
 
@@ -140,7 +140,7 @@ impl Backend for BackendImp {
                     crate::protocol::wl_shm::Format::Argb8888,
                 );
                 frame.clear(clear.r, clear.g, clear.b);
-                frame.render(render_list);
+                frame.render(render_list, time);
                 self.state
                     .wl_surface
                     .attach(&mut self.conn, Some(buffer.into_wl_buffer()), 0, 0);
@@ -204,7 +204,7 @@ impl Backend for BackendImp {
 
                 let mut frame = state.frame(sw.width, sw.height, &buf.fb);
                 frame.clear(clear.r, clear.g, clear.b);
-                frame.render(render_list);
+                frame.render(render_list, time);
                 drop(frame);
                 state.finish_frame();
 

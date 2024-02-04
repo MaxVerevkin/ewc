@@ -47,12 +47,6 @@ impl RendererStateImp {
         wl_format: wl_shm::Format,
     ) -> Box<dyn Frame + 'a> {
         Box::new(FrameImp {
-            time: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as u32,
-            width,
-            height,
             image: pixman::Image::from_slice_mut(
                 wl_format_to_pixman(wl_format).unwrap(),
                 width as usize,
@@ -214,26 +208,11 @@ impl RendererState for RendererStateImp {
 }
 
 struct FrameImp<'a> {
-    time: u32,
-    width: u32,
-    height: u32,
     image: pixman::Image<'a, 'static>,
     state: &'a RendererStateImp,
 }
 
 impl Frame for FrameImp<'_> {
-    fn time(&self) -> u32 {
-        self.time
-    }
-
-    fn width(&self) -> u32 {
-        self.width
-    }
-
-    fn height(&self) -> u32 {
-        self.height
-    }
-
     fn clear(&mut self, r: f32, g: f32, b: f32) {
         self.image
             .fill_boxes(

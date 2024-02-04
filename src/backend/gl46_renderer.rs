@@ -188,15 +188,7 @@ impl RendererStateImp {
             self.gl.Uniform2f(0, width as f32, height as f32);
         }
 
-        Box::new(FrameImp {
-            time: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as u32,
-            width,
-            height,
-            state: self,
-        })
+        Box::new(FrameImp { state: self })
     }
 
     pub fn finish_frame(&mut self) {
@@ -443,25 +435,10 @@ impl RendererState for RendererStateImp {
 }
 
 pub struct FrameImp<'a> {
-    time: u32,
-    width: u32,
-    height: u32,
     state: &'a mut RendererStateImp,
 }
 
 impl Frame for FrameImp<'_> {
-    fn time(&self) -> u32 {
-        self.time
-    }
-
-    fn width(&self) -> u32 {
-        self.width
-    }
-
-    fn height(&self) -> u32 {
-        self.height
-    }
-
     fn clear(&mut self, r: f32, g: f32, b: f32) {
         unsafe {
             self.state.gl.ClearColor(r, g, b, 1.0);

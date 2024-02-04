@@ -569,7 +569,7 @@ impl Backend for BackendImp {
         }
     }
 
-    fn render_frame(&mut self, clear: Color, render_list: &[RenderNode]) {
+    fn render_frame(&mut self, clear: Color, render_list: &[RenderNode], time: u32) {
         if self.suspended {
             return;
         }
@@ -588,7 +588,7 @@ impl Backend for BackendImp {
 
                 let mut frame = state.frame(temp_buf, width, height, FORMAT);
                 frame.clear(clear.r, clear.g, clear.a);
-                frame.render(render_list);
+                frame.render(render_list, time);
                 drop(frame);
 
                 // Reading from mapped buffer is terribly slow, but required for blending.
@@ -611,7 +611,7 @@ impl Backend for BackendImp {
                 swapchain.swap(0, 1);
                 let mut frame = state.frame(*width, *height, &swapchain[1]);
                 frame.clear(clear.r, clear.g, clear.b);
-                frame.render(render_list);
+                frame.render(render_list, time);
                 drop(frame);
                 state.finish_frame();
             }
