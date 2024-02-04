@@ -89,6 +89,9 @@ trait Frame {
     }
 }
 
+/// Pre-multiplied RGBA color _or_ a texture coordinate. Negative `a` denotes that this is a texture
+/// coordinate, in which case `r` and `g` are the coordinates into a texture at index `b`, and alpha
+/// is `-a`. This is done to use a single shader for both colored and textured quads.
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct Color {
@@ -117,7 +120,7 @@ impl Color {
             r: u,
             g: v,
             b: tex_i as f32,
-            a: -1.0 - a,
+            a: -a,
         }
     }
 }

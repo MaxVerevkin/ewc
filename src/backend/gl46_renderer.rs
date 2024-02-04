@@ -663,7 +663,7 @@ unsafe fn create_shader(gl: &gl46::GlFns, texture_units: u32) -> u32 {
         void main() {{
             if (v_Color.a < 0.0) {{
                 int tex_i = int(v_Color.b);
-                frag_color = texture(u_Textures[tex_i], v_Color.rg) * (-1.0 - v_Color.a);
+                frag_color = texture(u_Textures[tex_i], v_Color.rg) * (-v_Color.a);
             }} else {{
                 frag_color = v_Color;
             }}
