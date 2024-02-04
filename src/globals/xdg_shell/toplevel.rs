@@ -183,21 +183,20 @@ impl XdgToplevelRole {
             });
             surface.configured.set(true);
         } else if !surface.mapped.get() {
-            if surface.cur.borrow().buffer.is_none() {
-                return Err(io::Error::other("did not submit initial buffer"));
-            }
             if Some(self.cur_configure.get().serial) != xdg_surface.last_acked_configure.get() {
                 return Err(io::Error::other("did not ack the initial config"));
             }
-            let (x, y) = state
-                .focus_stack
-                .top()
-                .map(|t| (t.x.get() + 50, t.y.get() + 50))
-                .unwrap_or((20, 20));
-            self.x.set(x);
-            self.y.set(y);
-            state.focus_stack.push(self);
-            surface.mapped.set(true);
+            if surface.cur.borrow().buffer.is_some() {
+                let (x, y) = state
+                    .focus_stack
+                    .top()
+                    .map(|t| (t.x.get() + 50, t.y.get() + 50))
+                    .unwrap_or((20, 20));
+                self.x.set(x);
+                self.y.set(y);
+                state.focus_stack.push(self);
+                surface.mapped.set(true);
+            }
         } else {
             if surface.cur.borrow().buffer.is_none() {
                 surface.unmap(state);

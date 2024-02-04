@@ -49,14 +49,18 @@ impl XdgSurfaceRole {
         let surface = self.wl_surface.upgrade().unwrap();
         if let Some(geom) = self.pending.window_geometry.take() {
             let mut geom = pixman::Box32::from(geom);
-            let bbox = surface.get_bounding_box().unwrap();
-            geom.x1 = geom.x1.max(bbox.x1);
-            geom.x2 = geom.x2.min(bbox.x2);
-            geom.y1 = geom.y1.max(bbox.y1);
-            geom.y2 = geom.y2.min(bbox.y2);
-            let geom = WindowGeometry::try_from(geom).unwrap();
-            self.effective_window_geometry.set(Some(geom));
-            self.cur.window_geometry.set(Some(geom));
+            if let Some(bbox) = surface.get_bounding_box() {
+                geom.x1 = geom.x1.max(bbox.x1);
+                geom.x2 = geom.x2.min(bbox.x2);
+                geom.y1 = geom.y1.max(bbox.y1);
+                geom.y2 = geom.y2.min(bbox.y2);
+                let geom = WindowGeometry::try_from(geom).unwrap();
+                self.effective_window_geometry.set(Some(geom));
+                self.cur.window_geometry.set(Some(geom));
+            } else {
+                self.effective_window_geometry.set(None);
+                self.cur.window_geometry.set(None);
+            }
         }
 
         if self.cur.window_geometry.get().is_none() {
