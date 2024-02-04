@@ -353,13 +353,14 @@ fn wl_keyboard_cb(ctx: EventCtx<State, WlKeyboard>) {
                 .collect();
         }
         Event::Leave(_) => {
-            for key in kbd.pressed_keys.drain(..) {
-                ctx.state
-                    .backend_events_queue
-                    .push_back(BackendEvent::KeyReleased(kbd.id, key));
-            }
+            // for key in kbd.pressed_keys.drain(..) {
+            //     ctx.state
+            //         .backend_events_queue
+            //         .push_back(BackendEvent::KeyReleased(kbd.id, key));
+            // }
         }
         Event::Key(args) => {
+            let timestamp = InputTimestamp(args.time);
             use wl_keyboard::KeyState;
             match args.state {
                 KeyState::Released => {
@@ -369,14 +370,14 @@ fn wl_keyboard_cb(ctx: EventCtx<State, WlKeyboard>) {
                         kbd.pressed_keys.retain(|k| *k != args.key);
                         ctx.state
                             .backend_events_queue
-                            .push_back(BackendEvent::KeyReleased(kbd.id, args.key));
+                            .push_back(BackendEvent::KeyReleased(kbd.id, timestamp, args.key));
                     }
                 }
                 KeyState::Pressed => {
                     kbd.pressed_keys.push(args.key);
                     ctx.state
                         .backend_events_queue
-                        .push_back(BackendEvent::KeyPressed(kbd.id, args.key));
+                        .push_back(BackendEvent::KeyPressed(kbd.id, timestamp, args.key));
                 }
                 _ => unreachable!(),
             };
@@ -399,13 +400,13 @@ fn wl_pointer_cb(ctx: EventCtx<State, WlPointer>) {
     match ctx.event {
         Event::Enter(args) => {
             ptr.wl.set_cursor(ctx.conn, args.serial, None, 0, 0);
-            ctx.state
-                .backend_events_queue
-                .push_back(BackendEvent::PointerMotionAbsolute(
-                    ptr.id,
-                    args.surface_x.as_f32(),
-                    args.surface_y.as_f32(),
-                ))
+            // ctx.state
+            //     .backend_events_queue
+            //     .push_back(BackendEvent::PointerMotionAbsolute(
+            //         ptr.id,
+            //         args.surface_x.as_f32(),
+            //         args.surface_y.as_f32(),
+            //     ))
         }
         // Event::Leave(_) => todo!(),
         Event::Motion(args) => {
@@ -413,17 +414,19 @@ fn wl_pointer_cb(ctx: EventCtx<State, WlPointer>) {
                 .backend_events_queue
                 .push_back(BackendEvent::PointerMotionAbsolute(
                     ptr.id,
+                    InputTimestamp(args.time),
                     args.surface_x.as_f32(),
                     args.surface_y.as_f32(),
                 ))
         }
         Event::Button(args) => {
+            let timestamp = InputTimestamp(args.time);
             ctx.state.backend_events_queue.push_back(match args.state {
                 wl_pointer::ButtonState::Released => {
-                    BackendEvent::PointerBtnRelease(ptr.id, args.button)
+                    BackendEvent::PointerBtnRelease(ptr.id, timestamp, args.button)
                 }
                 wl_pointer::ButtonState::Pressed => {
-                    BackendEvent::PointerBtnPress(ptr.id, args.button)
+                    BackendEvent::PointerBtnPress(ptr.id, timestamp, args.button)
                 }
                 _ => unreachable!(),
             });
@@ -434,6 +437,7 @@ fn wl_pointer_cb(ctx: EventCtx<State, WlPointer>) {
                     .backend_events_queue
                     .push_back(BackendEvent::PointerAxisVertial(
                         ptr.id,
+                        InputTimestamp(args.time),
                         args.value.as_f32(),
                     ));
             }

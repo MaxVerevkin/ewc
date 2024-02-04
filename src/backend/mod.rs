@@ -41,11 +41,19 @@ pub trait RendererState: Any {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct BufferId(pub NonZeroU64);
+pub struct BufferId(NonZeroU64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct KeyboardId(pub NonZeroU64);
+pub struct KeyboardId(NonZeroU64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PointerId(pub NonZeroU64);
+pub struct PointerId(NonZeroU64);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct InputTimestamp(u32);
+
+impl InputTimestamp {
+    pub fn get(self) -> u32 {
+        self.0
+    }
+}
 
 pub trait Frame {
     fn time(&self) -> u32;
@@ -112,16 +120,16 @@ pub enum BackendEvent {
     Frame,
 
     NewKeyboard(KeyboardId),
-    KeyPressed(KeyboardId, u32),
-    KeyReleased(KeyboardId, u32),
+    KeyPressed(KeyboardId, InputTimestamp, u32),
+    KeyReleased(KeyboardId, InputTimestamp, u32),
     KeyboardRemoved(KeyboardId),
 
     NewPointer(PointerId),
-    PointerMotionAbsolute(PointerId, f32, f32),
-    PointerMotionRelative(PointerId, f32, f32),
-    PointerBtnPress(PointerId, u32),
-    PointerBtnRelease(PointerId, u32),
-    PointerAxisVertial(PointerId, f32),
+    PointerMotionAbsolute(PointerId, InputTimestamp, f32, f32),
+    PointerMotionRelative(PointerId, InputTimestamp, f32, f32),
+    PointerBtnPress(PointerId, InputTimestamp, u32),
+    PointerBtnRelease(PointerId, InputTimestamp, u32),
+    PointerAxisVertial(PointerId, InputTimestamp, f32),
     PointerRemoved(PointerId),
 }
 

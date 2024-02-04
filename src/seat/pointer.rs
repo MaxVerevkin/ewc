@@ -1,6 +1,7 @@
 use std::io;
 use std::rc::{Rc, Weak};
 
+use crate::backend::InputTimestamp;
 use crate::client::RequestCtx;
 use crate::globals::compositor::{Surface, SurfaceRole};
 use crate::globals::xdg_shell::toplevel::XdgToplevelRole;
@@ -82,14 +83,20 @@ impl Pointer {
         self.state = PtrState::None;
     }
 
-    pub fn forward_pointer(&mut self, surface: Rc<Surface>, x: f32, y: f32) {
+    pub fn forward_pointer(
+        &mut self,
+        surface: Rc<Surface>,
+        timestamp: InputTimestamp,
+        x: f32,
+        y: f32,
+    ) {
         let x = Fixed::from(x);
         let y = Fixed::from(y);
 
         if let PtrState::Entered(sp) = &mut self.state {
             if surface.wl == sp.surface.wl {
                 for ptr in surface.wl.conn().seat.pointers.borrow().iter() {
-                    ptr.motion(0, x, y);
+                    ptr.motion(timestamp.get(), x, y);
                     if ptr.version() >= 5 {
                         ptr.frame()
                     }
@@ -120,7 +127,13 @@ impl Pointer {
         }
     }
 
-    pub fn update_button(&mut self, btn: u32, pressed: bool, forward: bool) {
+    pub fn update_button(
+        &mut self,
+        btn: u32,
+        timestamp: InputTimestamp,
+        pressed: bool,
+        forward: bool,
+    ) {
         if pressed {
             self.pressed_buttons.push(btn);
         } else {
@@ -132,7 +145,7 @@ impl Pointer {
                 if pressed && !sp.pressed_buttons.contains(&btn) {
                     sp.pressed_buttons.push(btn);
                     for ptr in sp.surface.wl.conn().seat.pointers.borrow().iter() {
-                        ptr.button(1, 0, btn, wl_pointer::ButtonState::Pressed);
+                        ptr.button(1, timestamp.get(), btn, wl_pointer::ButtonState::Pressed);
                         if ptr.version() >= 5 {
                             ptr.frame()
                         }
@@ -140,7 +153,7 @@ impl Pointer {
                 } else if !pressed && sp.pressed_buttons.contains(&btn) {
                     sp.pressed_buttons.retain(|x| *x != btn);
                     for ptr in sp.surface.wl.conn().seat.pointers.borrow().iter() {
-                        ptr.button(1, 0, btn, wl_pointer::ButtonState::Released);
+                        ptr.button(1, timestamp.get(), btn, wl_pointer::ButtonState::Released);
                         if ptr.version() >= 5 {
                             ptr.frame()
                         }
@@ -154,11 +167,15 @@ impl Pointer {
         self.pressed_buttons.len()
     }
 
-    pub fn axis_vertical(&mut self, value: f32) {
+    pub fn axis_vertical(&mut self, value: f32, timestamp: InputTimestamp) {
         if let Some(surface) = self.get_focused_surface() {
             for ptr in surface.wl.conn().seat.pointers.borrow().iter() {
                 if value != 0.0 {
-                    ptr.axis(0, wl_pointer::Axis::VerticalScroll, Fixed::from(value));
+                    ptr.axis(
+                        timestamp.get(),
+                        wl_pointer::Axis::VerticalScroll,
+                        Fixed::from(value),
+                    );
                     if ptr.version() >= 5 {
                         ptr.frame()
                     }

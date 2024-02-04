@@ -11,6 +11,7 @@ use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use backend::InputTimestamp;
 use globals::single_pixel_buffer::SinglePixelBufferManager;
 use globals::xdg_shell::popup::XdgPopupRole;
 use xkbcommon::xkb;
@@ -201,7 +202,7 @@ fn render_surface(frame: &mut dyn Frame, surf: &Surface, alpha: f32, x: i32, y: 
 }
 
 impl Server {
-    fn pointer_moved(&mut self) {
+    fn pointer_moved(&mut self, timestamp: InputTimestamp) {
         match &self.state.seat.pointer.state {
             PtrState::Moving {
                 toplevel,
@@ -259,7 +260,10 @@ impl Server {
                     let (x, y) = surf.get_pos().unwrap();
                     let sx = self.state.seat.pointer.x.round() - x as f32;
                     let sy = self.state.seat.pointer.y.round() - y as f32;
-                    self.state.seat.pointer.forward_pointer(surf, sx, sy);
+                    self.state
+                        .seat
+                        .pointer
+                        .forward_pointer(surf, timestamp, sx, sy);
                 } else if let Some(surf_under) = self
                     .state
                     .focus_stack
@@ -267,6 +271,7 @@ impl Server {
                 {
                     self.state.seat.pointer.forward_pointer(
                         surf_under.surf,
+                        timestamp,
                         surf_under.sx,
                         surf_under.sy,
                     );
@@ -364,7 +369,7 @@ impl Server {
                 }
                 BackendEvent::NewKeyboard(_id) => (),
                 BackendEvent::KeyboardRemoved(_id) => (),
-                BackendEvent::KeyPressed(_id, key) => {
+                BackendEvent::KeyPressed(_id, timestamp, key) => {
                     let keysym = self
                         .state
                         .seat
@@ -395,10 +400,10 @@ impl Server {
                                 toplevel.wl_surface.upgrade().unwrap().wl.clone(),
                             ));
                         }
-                        self.state.seat.keyboard.update_key(key, true);
+                        self.state.seat.keyboard.update_key(key, timestamp, true);
                     }
                 }
-                BackendEvent::KeyReleased(_id, key) => {
+                BackendEvent::KeyReleased(_id, timestamp, key) => {
                     if let Some(popup) = self.state.popup_stack.iter().rev().find(|p| p.grab.get())
                     {
                         self.state.seat.kbd_focus_surface(Some(
@@ -409,20 +414,20 @@ impl Server {
                             toplevel.wl_surface.upgrade().unwrap().wl.clone(),
                         ));
                     }
-                    self.state.seat.keyboard.update_key(key, false);
+                    self.state.seat.keyboard.update_key(key, timestamp, false);
                 }
                 BackendEvent::NewPointer(_id) => (),
-                BackendEvent::PointerMotionAbsolute(_id, x, y) => {
+                BackendEvent::PointerMotionAbsolute(_id, timestamp, x, y) => {
                     self.state.seat.pointer.x = x;
                     self.state.seat.pointer.y = y;
-                    self.pointer_moved();
+                    self.pointer_moved(timestamp);
                 }
-                BackendEvent::PointerMotionRelative(_id, dx, dy) => {
+                BackendEvent::PointerMotionRelative(_id, timestamp, dx, dy) => {
                     self.state.seat.pointer.x += dx;
                     self.state.seat.pointer.y += dy;
-                    self.pointer_moved();
+                    self.pointer_moved(timestamp);
                 }
-                BackendEvent::PointerBtnPress(_id, btn) => {
+                BackendEvent::PointerBtnPress(_id, timestmap, btn) => {
                     let mut handeled = false;
 
                     if self.state.seat.pointer.number_of_pressed_buttons() == 0 {
@@ -455,23 +460,37 @@ impl Server {
                         }
                     }
 
-                    self.state.seat.pointer.update_button(btn, true, !handeled);
+                    self.state
+                        .seat
+                        .pointer
+                        .update_button(btn, timestmap, true, !handeled);
                 }
-                BackendEvent::PointerBtnRelease(_id, btn) => match &self.state.seat.pointer.state {
-                    PtrState::Moving { .. } => {
-                        self.state.seat.pointer.state = PtrState::None;
-                        self.state.seat.pointer.update_button(btn, false, false);
+                BackendEvent::PointerBtnRelease(_id, timestamp, btn) => {
+                    match &self.state.seat.pointer.state {
+                        PtrState::Moving { .. } => {
+                            self.state.seat.pointer.state = PtrState::None;
+                            self.state
+                                .seat
+                                .pointer
+                                .update_button(btn, timestamp, false, false);
+                        }
+                        PtrState::Resizing { .. } => {
+                            self.state.seat.pointer.state = PtrState::None;
+                            self.state
+                                .seat
+                                .pointer
+                                .update_button(btn, timestamp, false, false);
+                        }
+                        _ => {
+                            self.state
+                                .seat
+                                .pointer
+                                .update_button(btn, timestamp, false, true);
+                        }
                     }
-                    PtrState::Resizing { .. } => {
-                        self.state.seat.pointer.state = PtrState::None;
-                        self.state.seat.pointer.update_button(btn, false, false);
-                    }
-                    _ => {
-                        self.state.seat.pointer.update_button(btn, false, true);
-                    }
-                },
-                BackendEvent::PointerAxisVertial(_id, value) => {
-                    self.state.seat.pointer.axis_vertical(value);
+                }
+                BackendEvent::PointerAxisVertial(_id, timestamp, value) => {
+                    self.state.seat.pointer.axis_vertical(value, timestamp);
                 }
                 BackendEvent::PointerRemoved(_id) => (),
             }

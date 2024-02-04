@@ -10,7 +10,7 @@ use drm::control::dumbbuffer::DumbBuffer;
 use drm::control::{AtomicCommitFlags, Device, FbCmd2Flags};
 use drm::Device as _;
 use input::event::keyboard::KeyboardEventTrait;
-use input::event::pointer::PointerScrollEvent;
+use input::event::pointer::{PointerEventTrait, PointerScrollEvent};
 use input::Libinput;
 
 use super::*;
@@ -465,66 +465,81 @@ impl Backend for BackendImp {
                         input::Event::Keyboard(e) => {
                             let input::event::KeyboardEvent::Key(e) = e else { continue };
                             let key = e.key();
+                            let timestamp = InputTimestamp(e.time());
                             self.backend_events_queue.push_back(
                                 if e.key_state() == input::event::keyboard::KeyState::Pressed {
-                                    BackendEvent::KeyPressed(KeyboardId(NonZeroU64::MIN), key)
+                                    BackendEvent::KeyPressed(
+                                        KeyboardId(NonZeroU64::MIN),
+                                        timestamp,
+                                        key,
+                                    )
                                 } else {
-                                    BackendEvent::KeyReleased(KeyboardId(NonZeroU64::MIN), key)
+                                    BackendEvent::KeyReleased(
+                                        KeyboardId(NonZeroU64::MIN),
+                                        timestamp,
+                                        key,
+                                    )
                                 },
                             );
                         }
-                        input::Event::Pointer(e) => match e {
-                            input::event::PointerEvent::Motion(e) => {
-                                self.backend_events_queue.push_back(
-                                    BackendEvent::PointerMotionRelative(
-                                        PointerId(NonZeroU64::MIN),
-                                        e.dx() as f32,
-                                        e.dy() as f32,
-                                    ),
-                                );
-                            }
-                            // input::event::PointerEvent::MotionAbsolute(_) => todo!(),
-                            input::event::PointerEvent::Button(e) => {
-                                let btn = e.button();
-                                self.backend_events_queue.push_back(
-                                    if e.button_state()
-                                        == input::event::pointer::ButtonState::Pressed
-                                    {
-                                        BackendEvent::PointerBtnPress(
+                        input::Event::Pointer(e) => {
+                            let timestamp = InputTimestamp(e.time());
+                            match e {
+                                input::event::PointerEvent::Motion(e) => {
+                                    self.backend_events_queue.push_back(
+                                        BackendEvent::PointerMotionRelative(
                                             PointerId(NonZeroU64::MIN),
-                                            btn,
-                                        )
-                                    } else {
-                                        BackendEvent::PointerBtnRelease(
+                                            timestamp,
+                                            e.dx() as f32,
+                                            e.dy() as f32,
+                                        ),
+                                    );
+                                }
+                                // input::event::PointerEvent::MotionAbsolute(_) => todo!(),
+                                input::event::PointerEvent::Button(e) => {
+                                    let btn = e.button();
+                                    self.backend_events_queue.push_back(
+                                        if e.button_state()
+                                            == input::event::pointer::ButtonState::Pressed
+                                        {
+                                            BackendEvent::PointerBtnPress(
+                                                PointerId(NonZeroU64::MIN),
+                                                timestamp,
+                                                btn,
+                                            )
+                                        } else {
+                                            BackendEvent::PointerBtnRelease(
+                                                PointerId(NonZeroU64::MIN),
+                                                timestamp,
+                                                btn,
+                                            )
+                                        },
+                                    );
+                                }
+                                // input::event::PointerEvent::Axis(_) => todo!(),
+                                input::event::PointerEvent::ScrollWheel(scroll_wheel) => {
+                                    assert!(!scroll_wheel
+                                        .has_axis(input::event::pointer::Axis::Horizontal));
+                                    let value = scroll_wheel
+                                        .has_axis(input::event::pointer::Axis::Vertical)
+                                        .then(|| {
+                                            scroll_wheel
+                                                .scroll_value(input::event::pointer::Axis::Vertical)
+                                        })
+                                        .unwrap_or(0.0);
+                                    self.backend_events_queue.push_back(
+                                        BackendEvent::PointerAxisVertial(
                                             PointerId(NonZeroU64::MIN),
-                                            btn,
-                                        )
-                                    },
-                                );
+                                            timestamp,
+                                            value as f32,
+                                        ),
+                                    );
+                                }
+                                // input::event::PointerEvent::ScrollFinger(_) => todo!(),
+                                // input::event::PointerEvent::ScrollContinuous(_) => todo!(),
+                                _ => (),
                             }
-                            // input::event::PointerEvent::Axis(_) => todo!(),
-                            input::event::PointerEvent::ScrollWheel(scroll_wheel) => {
-                                assert!(
-                                    !scroll_wheel.has_axis(input::event::pointer::Axis::Horizontal)
-                                );
-                                let value = scroll_wheel
-                                    .has_axis(input::event::pointer::Axis::Vertical)
-                                    .then(|| {
-                                        scroll_wheel
-                                            .scroll_value(input::event::pointer::Axis::Vertical)
-                                    })
-                                    .unwrap_or(0.0);
-                                self.backend_events_queue.push_back(
-                                    BackendEvent::PointerAxisVertial(
-                                        PointerId(NonZeroU64::MIN),
-                                        value as f32,
-                                    ),
-                                );
-                            }
-                            // input::event::PointerEvent::ScrollFinger(_) => todo!(),
-                            // input::event::PointerEvent::ScrollContinuous(_) => todo!(),
-                            _ => (),
-                        },
+                        }
                         input::Event::Touch(_) => (),
                         input::Event::Tablet(_) => (),
                         input::Event::TabletPad(_) => (),

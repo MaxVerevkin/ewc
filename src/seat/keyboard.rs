@@ -5,6 +5,7 @@ use std::os::fd::{AsFd, FromRawFd};
 
 use xkbcommon::xkb;
 
+use crate::backend::InputTimestamp;
 use crate::client::RequestCtx;
 use crate::protocol::*;
 use crate::wayland_core::Proxy;
@@ -132,7 +133,7 @@ impl Keyboard {
         }
     }
 
-    pub fn update_key(&mut self, key: u32, pressed: bool) {
+    pub fn update_key(&mut self, key: u32, timestamp: InputTimestamp, pressed: bool) {
         self.xkb_state.update_key(
             xkb::Keycode::new(key + 8),
             if pressed {
@@ -160,7 +161,7 @@ impl Keyboard {
 
         if let Some(focused_surf) = &self.focused_surface {
             for kbd in focused_surf.conn().seat.keyboards.borrow().iter() {
-                kbd.key(1, 0, key, state);
+                kbd.key(1, timestamp.get(), key, state);
             }
         }
     }
