@@ -146,8 +146,8 @@ impl IsGlobal for WlOutput {
         );
         self.mode(
             wl_output::Mode::Current | wl_output::Mode::Preferred,
-            200,
-            200,
+            1920,
+            1080,
             0,
         );
         if self.version() >= 2 {
