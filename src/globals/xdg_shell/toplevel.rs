@@ -5,7 +5,7 @@ use std::num::NonZeroU32;
 use std::rc::{Rc, Weak};
 
 use crate::client::RequestCtx;
-use crate::globals::compositor::{MapState, Surface};
+use crate::globals::compositor::Surface;
 use crate::protocol::xdg_toplevel::ResizeEdge;
 use crate::State;
 use crate::{protocol::*, Proxy};
@@ -16,7 +16,6 @@ pub struct XdgToplevelRole {
     pub wl: XdgToplevel,
     pub xdg_surface: Weak<XdgSurfaceRole>,
     pub wl_surface: Weak<Surface>,
-    map_state: Cell<MapState>,
 
     pub x: Cell<i32>,
     pub y: Cell<i32>,
@@ -48,7 +47,6 @@ impl XdgToplevelRole {
             wl: xdg_toplevel,
             xdg_surface: Rc::downgrade(xdg_surface),
             wl_surface: xdg_surface.wl_surface.clone(),
-            map_state: Cell::new(MapState::Unmapped),
 
             x: Cell::new(0),
             y: Cell::new(0),
@@ -64,11 +62,6 @@ impl XdgToplevelRole {
             dirty_min_size: Cell::new(false),
             dirty_max_size: Cell::new(false),
         }
-    }
-
-    fn unmap(&self, state: &mut State) {
-        self.map_state.set(MapState::Unmapped);
-        self.wl_surface.upgrade().unwrap().unmap(state);
     }
 
     pub fn apply_pending_configure(&self) {
@@ -101,52 +94,54 @@ impl XdgToplevelRole {
     }
 
     pub fn request_size(&self, edge: ResizeEdge, mut width: NonZeroU32, mut height: NonZeroU32) {
-        if self.map_state.get() == MapState::Mapped {
-            let cur = self.cur.borrow();
-            if let Some((max_w, max_h)) = cur.max_size {
-                if max_w != 0 && width.get() > max_w {
-                    width = NonZeroU32::new(max_w).unwrap();
-                }
-                if max_h != 0 && height.get() > max_h {
-                    height = NonZeroU32::new(max_h).unwrap();
-                }
+        if !self.wl_surface.upgrade().unwrap().mapped.get() {
+            return;
+        }
+
+        let cur = self.cur.borrow();
+        if let Some((max_w, max_h)) = cur.max_size {
+            if max_w != 0 && width.get() > max_w {
+                width = NonZeroU32::new(max_w).unwrap();
             }
-            if let Some((min_w, min_h)) = cur.min_size {
-                if min_w != 0 && width.get() < min_w {
-                    width = NonZeroU32::new(min_w).unwrap();
-                }
-                if min_h != 0 && height.get() < min_h {
-                    height = NonZeroU32::new(min_h).unwrap();
-                }
+            if max_h != 0 && height.get() > max_h {
+                height = NonZeroU32::new(max_h).unwrap();
             }
+        }
+        if let Some((min_w, min_h)) = cur.min_size {
+            if min_w != 0 && width.get() < min_w {
+                width = NonZeroU32::new(min_w).unwrap();
+            }
+            if min_h != 0 && height.get() < min_h {
+                height = NonZeroU32::new(min_h).unwrap();
+            }
+        }
 
-            let mut configure = self.pending_configure.take().unwrap_or_else(|| {
-                let mut c = self.cur_configure.get();
-                c.serial += 1;
-                c
-            });
+        let mut configure = self.pending_configure.take().unwrap_or_else(|| {
+            let mut c = self.cur_configure.get();
+            c.serial += 1;
+            c
+        });
 
-            configure.width = width.get();
-            configure.heinght = height.get();
-            let serial = configure.serial;
-            self.pending_configure.set(Some(configure));
+        configure.width = width.get();
+        configure.heinght = height.get();
+        let serial = configure.serial;
+        self.pending_configure.set(Some(configure));
 
-            match self.resizing.get() {
-                None => {
-                    let geom = self
-                        .xdg_surface
-                        .upgrade()
-                        .unwrap()
-                        .get_window_geometry()
-                        .unwrap();
-                    let (nx, ny) = geom.get_opposite_edge_point(edge);
-                    self.resizing
-                        .set(Some((edge, nx + self.x.get(), ny + self.y.get(), serial)));
-                }
-                Some((oe, onx, ony, _oserial)) => {
-                    assert_eq!(oe, edge);
-                    self.resizing.set(Some((edge, onx, ony, serial)));
-                }
+        match self.resizing.get() {
+            None => {
+                let geom = self
+                    .xdg_surface
+                    .upgrade()
+                    .unwrap()
+                    .get_window_geometry()
+                    .unwrap();
+                let (nx, ny) = geom.get_opposite_edge_point(edge);
+                self.resizing
+                    .set(Some((edge, nx + self.x.get(), ny + self.y.get(), serial)));
+            }
+            Some((oe, onx, ony, _oserial)) => {
+                assert_eq!(oe, edge);
+                self.resizing.set(Some((edge, onx, ony, serial)));
             }
         }
     }
@@ -172,55 +167,51 @@ impl XdgToplevelRole {
         let surface = self.wl_surface.upgrade().unwrap();
         let xdg_surface = self.xdg_surface.upgrade().unwrap();
 
-        match self.map_state.get() {
-            MapState::Unmapped => {
-                if surface.cur.borrow().buffer.is_some() {
-                    return Err(io::Error::other("unmapped surface commited a buffer"));
-                }
-                let serial = self.cur_configure.get().serial + 1;
-                self.wl.configure(0, 0, Vec::new());
-                xdg_surface.wl.configure(serial);
-                self.map_state.set(MapState::WaitingFirstBuffer);
-                self.pending_configure.set(None);
-                self.cur_configure.set(ToplevelConfigure {
-                    serial,
-                    width: 0,
-                    heinght: 0,
-                    activated: false,
-                });
+        if !surface.configured.get() {
+            if surface.cur.borrow().buffer.is_some() {
+                return Err(io::Error::other("unmapped surface commited a buffer"));
             }
-            MapState::WaitingFirstBuffer => {
-                if surface.cur.borrow().buffer.is_none() {
-                    return Err(io::Error::other("did not submit initial buffer"));
-                }
-                if Some(self.cur_configure.get().serial) != xdg_surface.last_acked_configure.get() {
-                    return Err(io::Error::other("did not ack the initial config"));
-                }
-                let (x, y) = state
-                    .focus_stack
-                    .top()
-                    .map(|t| (t.x.get() + 50, t.y.get() + 50))
-                    .unwrap_or((20, 20));
-                self.map_state.set(MapState::Mapped);
-                self.x.set(x);
-                self.y.set(y);
-                state.focus_stack.push(self);
+            let serial = self.cur_configure.get().serial + 1;
+            self.wl.configure(0, 0, Vec::new());
+            xdg_surface.wl.configure(serial);
+            self.pending_configure.set(None);
+            self.cur_configure.set(ToplevelConfigure {
+                serial,
+                width: 0,
+                heinght: 0,
+                activated: false,
+            });
+            surface.configured.set(true);
+        } else if !surface.mapped.get() {
+            if surface.cur.borrow().buffer.is_none() {
+                return Err(io::Error::other("did not submit initial buffer"));
             }
-            MapState::Mapped => {
-                if surface.cur.borrow().buffer.is_none() {
-                    self.unmap(state);
-                } else if let Some((edge, x, y, serial)) = self.resizing.get() {
-                    let geom = xdg_surface.get_window_geometry().unwrap();
-                    let (nx, ny) = geom.get_opposite_edge_point(edge);
-                    self.x.set(x - nx);
-                    self.y.set(y - ny);
-                    if xdg_surface
-                        .last_acked_configure
-                        .get()
-                        .is_some_and(|acked| acked.wrapping_sub(serial) as i32 >= 0)
-                    {
-                        self.resizing.set(None);
-                    }
+            if Some(self.cur_configure.get().serial) != xdg_surface.last_acked_configure.get() {
+                return Err(io::Error::other("did not ack the initial config"));
+            }
+            let (x, y) = state
+                .focus_stack
+                .top()
+                .map(|t| (t.x.get() + 50, t.y.get() + 50))
+                .unwrap_or((20, 20));
+            self.x.set(x);
+            self.y.set(y);
+            state.focus_stack.push(self);
+            surface.mapped.set(true);
+        } else {
+            if surface.cur.borrow().buffer.is_none() {
+                surface.unmap(state);
+            } else if let Some((edge, x, y, serial)) = self.resizing.get() {
+                let geom = xdg_surface.get_window_geometry().unwrap();
+                let (nx, ny) = geom.get_opposite_edge_point(edge);
+                self.x.set(x - nx);
+                self.y.set(y - ny);
+                if xdg_surface
+                    .last_acked_configure
+                    .get()
+                    .is_some_and(|acked| acked.wrapping_sub(serial) as i32 >= 0)
+                {
+                    self.resizing.set(None);
                 }
             }
         }
@@ -239,11 +230,12 @@ pub struct XdgToplevelState {
 
 fn xdg_toplevel_cb(ctx: RequestCtx<XdgToplevel>) -> io::Result<()> {
     let toplevel = ctx.client.compositor.xdg_toplevels.get(&ctx.proxy).unwrap();
+    let surface = toplevel.wl_surface.upgrade().unwrap();
 
     use xdg_toplevel::Request;
     match ctx.request {
         Request::Destroy => {
-            toplevel.unmap(ctx.state);
+            surface.unmap(ctx.state);
             *toplevel
                 .xdg_surface
                 .upgrade()

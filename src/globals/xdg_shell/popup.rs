@@ -3,7 +3,7 @@ use std::io;
 use std::rc::{Rc, Weak};
 
 use crate::client::RequestCtx;
-use crate::globals::compositor::{MapState, Surface};
+use crate::globals::compositor::Surface;
 use crate::State;
 use crate::{protocol::*, Proxy};
 
@@ -17,7 +17,6 @@ pub struct XdgPopupRole {
     pub parent: Weak<XdgSurfaceRole>,
     pub positioner: Cell<Positioner>,
     pub grab: Cell<bool>,
-    map_state: Cell<MapState>,
     next_configure_serial: Cell<u32>,
     last_serial: Cell<u32>,
 
@@ -40,7 +39,6 @@ impl XdgPopupRole {
             parent: Rc::downgrade(parent),
             positioner: Cell::new(positioner),
             grab: Cell::new(false),
-            map_state: Cell::new(MapState::Unmapped),
             next_configure_serial: Cell::new(0),
             last_serial: Cell::new(0),
 
@@ -155,44 +153,24 @@ impl XdgPopupRole {
         let surface = self.wl_surface.upgrade().unwrap();
         let xdg_surface = self.xdg_surface.upgrade().unwrap();
 
-        match self.map_state.get() {
-            MapState::Unmapped => {
-                if surface.cur.borrow().buffer.is_some() {
-                    return Err(io::Error::other("unmapped surface commited a buffer"));
-                }
-                self.configure();
-                self.map_state.set(MapState::WaitingFirstBuffer);
+        if !surface.configured.get() {
+            if surface.cur.borrow().buffer.is_some() {
+                return Err(io::Error::other("unmapped surface commited a buffer"));
             }
-            MapState::WaitingFirstBuffer => {
-                if surface.cur.borrow().buffer.is_none() {
-                    return Err(io::Error::other("did not submit initial buffer"));
-                }
-                if Some(self.last_serial.get()) != xdg_surface.last_acked_configure.get() {
-                    return Err(io::Error::other("did not ack the initial config"));
-                }
-                self.map_state.set(MapState::Mapped);
-                *self.parent.upgrade().unwrap().popup.borrow_mut() = Some(self.clone());
-                state.popup_stack.push(self.clone());
+            self.configure();
+            surface.configured.set(true);
+        } else if !surface.mapped.get() {
+            if surface.cur.borrow().buffer.is_none() {
+                return Err(io::Error::other("did not submit initial buffer"));
             }
-            MapState::Mapped => {
-                assert!(surface.cur.borrow().buffer.is_some(), "unimplemented");
-            } //             MapState::Mapped => {
-              //                 if surface.cur.borrow().buffer.is_none() {
-              //                     self.unmap(state);
-              //                 } else if let Some((edge, x, y, serial)) = self.resizing.get() {
-              //                     let geom = xdg_surface.get_window_geometry().unwrap();
-              //                     let (nx, ny) = geom.get_opposite_edge_point(edge);
-              //                     self.x.set(x - nx);
-              //                     self.y.set(y - ny);
-              //                     if xdg_surface
-              //                         .last_acked_configure
-              //                         .get()
-              //                         .is_some_and(|acked| acked.wrapping_sub(serial) as i32 >= 0)
-              //                     {
-              //                         self.resizing.set(None);
-              //                     }
-              //                 }
-              //             }
+            if Some(self.last_serial.get()) != xdg_surface.last_acked_configure.get() {
+                return Err(io::Error::other("did not ack the initial config"));
+            }
+            *self.parent.upgrade().unwrap().popup.borrow_mut() = Some(self.clone());
+            state.popup_stack.push(self.clone());
+            surface.mapped.set(true);
+        } else {
+            assert!(surface.cur.borrow().buffer.is_some(), "unimplemented");
         }
 
         Ok(())

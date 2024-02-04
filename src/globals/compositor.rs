@@ -46,21 +46,17 @@ impl Compositor {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MapState {
-    Unmapped,
-    WaitingFirstBuffer,
-    Mapped,
-}
-
 pub struct Surface {
     pub wl: WlSurface,
     pub role: RefCell<SurfaceRole>,
     pub cur: RefCell<SurfaceState>,
     pending: RefCell<SurfaceState>,
-    pending_buffer: Cell<Option<WlBuffer>>,
+    pub pending_buffer: Cell<Option<WlBuffer>>,
     viewport: Cell<Option<WpViewport>>,
     buf_transform: Cell<Option<BufferTransform>>,
+
+    pub mapped: Cell<bool>,
+    pub configured: Cell<bool>,
 }
 
 #[derive(Default)]
@@ -171,17 +167,24 @@ impl Surface {
             pending_buffer: Cell::new(None),
             viewport: Cell::new(None),
             buf_transform: Cell::new(None),
+
+            mapped: Cell::new(false),
+            configured: Cell::new(false),
         }
     }
 
     pub fn unmap(&self, state: &mut State) {
-        if let Some(toplevel) = self.get_xdg_toplevel() {
-            state.focus_stack.remove(&toplevel);
+        if self.mapped.get() {
+            if let Some(toplevel) = self.get_xdg_toplevel() {
+                state.focus_stack.remove(&toplevel);
+            }
+            state.seat.unfocus_surface(&self.wl);
+            for sub in &self.cur.borrow().subsurfaces {
+                sub.surface.unmap(state);
+            }
         }
-        state.seat.unfocus_surface(&self.wl);
-        for sub in &self.cur.borrow().subsurfaces {
-            sub.surface.unmap(state);
-        }
+        self.mapped.set(false);
+        self.configured.set(false);
     }
 
     fn validate_and_update_buf_transform(&self, backend: &mut dyn Backend) -> io::Result<()> {
@@ -250,43 +253,13 @@ impl Surface {
                     let (parent_x, parent_y) = parent.wl_surface.upgrade().unwrap().get_pos()?;
                     let parent_geom = parent.get_window_geometry()?;
                     let popup_geom = popup.xdg_surface.upgrade().unwrap().get_window_geometry()?;
-                    dbg!(Some((
+                    Some((
                         parent_x + parent_geom.x + popup.x.get() - popup_geom.x,
                         parent_y + parent_geom.y + popup.y.get() - popup_geom.y,
-                    )))
+                    ))
                 }
             },
         }
-
-        // if let Some(xdg) = s.get_xdg_surface() {
-        //     match &*xdg.specific.borrow() {
-        //         xdg_shell::SpecificRole::None => (),
-        //         xdg_shell::SpecificRole::Toplevel(toplevel) => {
-        //             if let Some(geom) = xdg.get_window_geometry() {
-        //                 return Some((
-        //                     toplevel.x.get() + sub_x - geom.x,
-        //                     toplevel.y.get() + sub_y - geom.y,
-        //                 ));
-        //             }
-        //         }
-        //         xdg_shell::SpecificRole::Popup(popup) => {
-        //             let parent = popup.parent.upgrade().unwrap();
-        //             if let Some(geom) = popup.xdg_surface.upgrade().unwrap().get_window_geometry() {
-        //                 return Some((
-        //                     toplevel.x.get() + sub_x - geom.x,
-        //                     toplevel.y.get() + sub_y - geom.y,
-        //                 ));
-        //             }
-        //         }
-        //     }
-        //     // eprintln!("yes");
-        //     // if let Some(toplevel) = xdg.get_toplevel() {
-        //     //     eprintln!("yes!!!");
-        //     // } else {
-        //     //     eprintln!("noooo");
-        //     // }
-        // }
-        // None
     }
 
     pub fn effective_is_sync(&self) -> bool {

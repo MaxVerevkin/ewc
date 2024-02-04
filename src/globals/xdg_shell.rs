@@ -168,6 +168,12 @@ impl IsGlobal for XdgWmBase {
                     if surface.has_role() {
                         return Err(io::Error::other("surface already has a role"));
                     }
+                    if surface.buf_transform().is_some() || surface.pending_buffer.take().is_some()
+                    {
+                        return Err(io::Error::other(
+                            "surface has a buffer attached or committed",
+                        ));
+                    }
                     args.id.set_callback(xdg_surface_cb);
                     let xdg_surface = Rc::new(XdgSurfaceRole {
                         wl: args.id.clone(),
