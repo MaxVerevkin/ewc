@@ -462,34 +462,26 @@ fn wl_surface_cb(ctx: RequestCtx<WlSurface>) -> io::Result<()> {
         }
         Request::SetOpaqueRegion(reg_id) => {
             let mut pending = surface.pending.borrow_mut();
-            pending.opaque_region = match reg_id {
-                Some(reg) => Some(ctx.client.compositor.regions.get(&reg).unwrap().clone()),
-                None => None,
-            };
+            pending.opaque_region =
+                reg_id.map(|reg| ctx.client.compositor.regions.get(&reg).unwrap().clone());
             pending.mask.set(CommittedMaskBit::OpaqueRegion);
         }
         Request::SetInputRegion(reg_id) => {
             let mut pending = surface.pending.borrow_mut();
-            pending.input_region = match reg_id {
-                Some(reg) => Some(ctx.client.compositor.regions.get(&reg).unwrap().clone()),
-                None => None,
-            };
+            pending.input_region =
+                reg_id.map(|reg| ctx.client.compositor.regions.get(&reg).unwrap().clone());
             pending.mask.set(CommittedMaskBit::InputRegion);
         }
         Request::Commit => {
             let mut pending = surface.pending.borrow_mut();
             if pending.mask.contains(CommittedMaskBit::Buffer) {
                 pending.buffer = surface.pending_buffer.take().and_then(|pending_buffer| {
-                    if pending_buffer.is_alive() {
-                        Some(
-                            ctx.state
-                                .backend
-                                .renderer_state()
-                                .buffer_commited(pending_buffer),
-                        )
-                    } else {
-                        None
-                    }
+                    pending_buffer.is_alive().then(|| {
+                        ctx.state
+                            .backend
+                            .renderer_state()
+                            .buffer_commited(pending_buffer)
+                    })
                 });
             }
 
