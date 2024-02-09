@@ -48,21 +48,6 @@ impl Seat {
 
     pub fn remove_client(&mut self, client_id: ClientId) {
         if self
-            .keyboard
-            .focused_surface
-            .as_ref()
-            .is_some_and(|surf| surf.client_id() == client_id)
-        {
-            self.keyboard.focused_surface = None;
-        }
-
-        if let Some(surf) = self.pointer.get_focused_surface() {
-            if surf.wl.client_id() == client_id {
-                self.pointer.surface_unmapped(&surf.wl);
-            }
-        }
-
-        if self
             .selection
             .as_ref()
             .is_some_and(|x| x.wl.client_id() == client_id)
