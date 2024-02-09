@@ -32,15 +32,16 @@ impl Compositor {
         globals.add_global::<WpViewporter>(1);
     }
 
-    pub fn release_buffers(self, backend: &mut dyn Backend) {
+    pub fn destroy(self, state: &mut State) {
         for surface in self.surfaces.values() {
+            surface.unmap(state);
             if let Some(subsurf) = surface.get_subsurface() {
                 if let Some(buf_id) = subsurf.cached_state.borrow().buffer {
-                    backend.renderer_state().buffer_unlock(buf_id);
+                    state.backend.renderer_state().buffer_unlock(buf_id);
                 }
             }
             if let Some(buf_id) = surface.cur.borrow().buffer {
-                backend.renderer_state().buffer_unlock(buf_id);
+                state.backend.renderer_state().buffer_unlock(buf_id);
             }
         }
     }
@@ -178,7 +179,7 @@ impl Surface {
             if let Some(toplevel) = self.get_xdg_toplevel() {
                 state.focus_stack.remove(&toplevel);
             }
-            state.seat.unfocus_surface(&self.wl);
+            state.seat.surface_unmapped(&self.wl);
             for sub in &self.cur.borrow().subsurfaces {
                 sub.surface.unmap(state);
             }

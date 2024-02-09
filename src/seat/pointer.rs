@@ -220,11 +220,17 @@ impl Pointer {
         }
     }
 
-    pub fn unfocus_surface(&mut self, wl_surface: &WlSurface) {
-        if self
-            .get_focused_surface()
-            .is_some_and(|x| x.wl == *wl_surface)
-        {
+    pub fn surface_unmapped(&mut self, wl_surface: &WlSurface) {
+        let mut should_leave = false;
+        match &self.state {
+            PtrState::None => (),
+            PtrState::Entered(surf) => should_leave = surf.surface.wl == *wl_surface,
+            PtrState::Moving { toplevel, .. } | PtrState::Resizing { toplevel, .. } => {
+                should_leave =
+                    toplevel.upgrade().unwrap().wl_surface.upgrade().unwrap().wl == *wl_surface
+            }
+        }
+        if should_leave {
             self.leave_any_surface();
         }
     }

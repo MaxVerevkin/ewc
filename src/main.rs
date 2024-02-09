@@ -115,9 +115,7 @@ impl Server {
             .retain(|x| x.wl.client_id() != client_id);
         self.state.debugger.remove_client(client_id);
         let client = self.clients.remove(&client_id).unwrap();
-        client
-            .compositor
-            .release_buffers(self.state.backend.as_mut());
+        client.compositor.destroy(&mut self.state);
         client.shm.destroy(&mut self.state);
         client.linux_dambuf.destroy(&mut self.state);
         self.event_loop.remove(client.conn.as_raw_fd()).unwrap();

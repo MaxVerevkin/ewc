@@ -58,7 +58,7 @@ impl Seat {
 
         if let Some(surf) = self.pointer.get_focused_surface() {
             if surf.wl.client_id() == client_id {
-                self.pointer.unfocus_surface(&surf.wl);
+                self.pointer.surface_unmapped(&surf.wl);
             }
         }
 
@@ -72,9 +72,9 @@ impl Seat {
         }
     }
 
-    pub fn unfocus_surface(&mut self, wl_surface: &WlSurface) {
-        self.keyboard.unfocus_surface(wl_surface);
-        self.pointer.unfocus_surface(wl_surface);
+    pub fn surface_unmapped(&mut self, wl_surface: &WlSurface) {
+        self.keyboard.surface_unmapped(wl_surface);
+        self.pointer.surface_unmapped(wl_surface);
     }
 
     pub fn kbd_focus_surface(&mut self, surface: Option<WlSurface>) {
