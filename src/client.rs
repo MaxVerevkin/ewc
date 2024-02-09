@@ -81,10 +81,6 @@ impl Connection {
         self.to_flush_set.add(self.client_id);
     }
 
-    pub fn get_display(&self) -> WlDisplay {
-        self.wl_display.clone()
-    }
-
     pub fn register_clients_object(&self, object: Object) -> io::Result<()> {
         self.resources.borrow_mut().register_clients(object)
     }
