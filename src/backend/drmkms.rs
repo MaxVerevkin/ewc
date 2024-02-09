@@ -261,6 +261,7 @@ pub fn new() -> Option<Box<dyn Backend>> {
         renderer_kind,
 
         next_input_id: NonZeroU64::MIN,
+        pointer_mapping: HashMap::new(),
         pointers: HashMap::new(),
     }))
 }
@@ -293,10 +294,13 @@ struct BackendImp {
     renderer_kind: RendererKind,
 
     next_input_id: NonZeroU64,
-    pointers: HashMap<PointerId, Pointer>,
+    pointer_mapping: HashMap<PointerId, input::Device>,
+    pointers: HashMap<input::Device, Pointer>,
 }
 
 struct Pointer {
+    id: PointerId,
+    #[allow(dead_code)]
     device: input::Device,
     ident: String,
 }
@@ -478,9 +482,11 @@ impl Backend for BackendImp {
                                 let device = e.device();
                                 if device.has_capability(input::DeviceCapability::Pointer) {
                                     let id = PointerId(next_id(&mut self.next_input_id));
+                                    self.pointer_mapping.insert(id, device.clone());
                                     self.pointers.insert(
-                                        id,
+                                        device.clone(),
                                         Pointer {
+                                            id,
                                             ident: format!(
                                                 "{}-{}-{}",
                                                 device.id_vendor(),
@@ -494,7 +500,15 @@ impl Backend for BackendImp {
                                         .push_back(BackendEvent::NewPointer(id));
                                 }
                             }
-                            input::event::DeviceEvent::Removed(_) => todo!(),
+                            input::event::DeviceEvent::Removed(e) => {
+                                let device = e.device();
+                                if device.has_capability(input::DeviceCapability::Pointer) {
+                                    let ptr = self.pointers.remove(&device).unwrap();
+                                    self.pointer_mapping.remove(&ptr.id);
+                                    self.backend_events_queue
+                                        .push_back(BackendEvent::PointerRemoved(ptr.id));
+                                }
+                            }
                             _ => (),
                         },
                         input::Event::Keyboard(e) => {
@@ -519,11 +533,12 @@ impl Backend for BackendImp {
                         }
                         input::Event::Pointer(e) => {
                             let timestamp = InputTimestamp(e.time());
+                            let ptr = self.pointers.get(&e.device()).unwrap();
                             match e {
                                 input::event::PointerEvent::Motion(e) => {
                                     self.backend_events_queue.push_back(
                                         BackendEvent::PointerMotionRelative(
-                                            PointerId(NonZeroU64::MIN),
+                                            ptr.id,
                                             timestamp,
                                             e.dx() as f32,
                                             e.dy() as f32,
@@ -537,17 +552,9 @@ impl Backend for BackendImp {
                                         if e.button_state()
                                             == input::event::pointer::ButtonState::Pressed
                                         {
-                                            BackendEvent::PointerBtnPress(
-                                                PointerId(NonZeroU64::MIN),
-                                                timestamp,
-                                                btn,
-                                            )
+                                            BackendEvent::PointerBtnPress(ptr.id, timestamp, btn)
                                         } else {
-                                            BackendEvent::PointerBtnRelease(
-                                                PointerId(NonZeroU64::MIN),
-                                                timestamp,
-                                                btn,
-                                            )
+                                            BackendEvent::PointerBtnRelease(ptr.id, timestamp, btn)
                                         },
                                     );
                                 }
@@ -564,7 +571,7 @@ impl Backend for BackendImp {
                                         .unwrap_or(0.0);
                                     self.backend_events_queue.push_back(
                                         BackendEvent::PointerAxisVertial(
-                                            PointerId(NonZeroU64::MIN),
+                                            ptr.id,
                                             timestamp,
                                             value as f32,
                                         ),
@@ -597,14 +604,19 @@ impl Backend for BackendImp {
         self.seat.switch_session(vt as i32).unwrap();
     }
 
-    fn pointer_get_name(&self, id: PointerId) -> &str {
-        &self.pointers.get(&id).unwrap().ident
+    fn pointer_get_name(&self, id: PointerId) -> Option<&str> {
+        let dev = self.pointer_mapping.get(&id)?;
+        let ptr = self.pointers.get(dev).unwrap();
+        Some(&ptr.ident)
     }
 
     fn pointer_set_tap_to_click(&mut self, id: PointerId, enable: bool) {
-        let ptr = self.pointers.get_mut(&id).unwrap();
-        if let Err(e) = ptr.device.config_tap_set_enabled(enable) {
-            eprintln!("failed to enable tap-to-click for {}: {e:?}", ptr.ident);
+        let Some(dev) = self.pointer_mapping.get_mut(&id) else { return };
+        if let Err(e) = dev.config_tap_set_enabled(enable) {
+            eprintln!(
+                "failed to set tap-to-click={enable} for {}: {e:?}",
+                self.pointers.get(dev).unwrap().ident
+            );
         }
     }
 

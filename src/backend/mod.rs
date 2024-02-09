@@ -22,7 +22,7 @@ pub trait Backend {
     fn poll(&mut self, data: u32) -> io::Result<()>;
     fn next_event(&mut self) -> Option<BackendEvent>;
     fn switch_vt(&mut self, vt: u32);
-    fn pointer_get_name(&self, id: PointerId) -> &str;
+    fn pointer_get_name(&self, id: PointerId) -> Option<&str>;
     fn pointer_set_tap_to_click(&mut self, id: PointerId, enable: bool);
     fn renderer_state(&mut self) -> &mut dyn RendererState;
     fn render_frame(&mut self, clear: Color, render_list: &[RenderNode], time: u32);

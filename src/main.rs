@@ -448,12 +448,13 @@ impl Server {
                     self.state.seat.keyboard.update_key(key, timestamp, false);
                 }
                 BackendEvent::NewPointer(id) => {
-                    let name = self.state.backend.pointer_get_name(id);
-                    eprintln!("new pointer: {name}");
-                    if let Some(config) = self.state.config.pointer.get(name) {
-                        self.state
-                            .backend
-                            .pointer_set_tap_to_click(id, config.tap_to_click);
+                    if let Some(name) = self.state.backend.pointer_get_name(id) {
+                        eprintln!("new pointer: id={id:?} name={name}");
+                        if let Some(config) = self.state.config.pointer.get(name) {
+                            self.state
+                                .backend
+                                .pointer_set_tap_to_click(id, config.tap_to_click);
+                        }
                     }
                 }
                 BackendEvent::PointerMotionAbsolute(_id, timestamp, x, y) => {
@@ -531,7 +532,9 @@ impl Server {
                 BackendEvent::PointerAxisVertial(_id, timestamp, value) => {
                     self.state.seat.pointer.axis_vertical(value, timestamp);
                 }
-                BackendEvent::PointerRemoved(_id) => (),
+                BackendEvent::PointerRemoved(id) => {
+                    eprintln!("pointer removed: id={id:?}");
+                }
             }
         }
         Ok(())
