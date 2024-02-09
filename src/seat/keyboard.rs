@@ -7,6 +7,7 @@ use xkbcommon::xkb;
 
 use crate::backend::InputTimestamp;
 use crate::client::RequestCtx;
+use crate::config::Config;
 use crate::protocol::*;
 use crate::wayland_core::Proxy;
 
@@ -54,10 +55,18 @@ pub struct ModsMask {
 }
 
 impl Keyboard {
-    pub fn new() -> Self {
+    pub fn new(config: &Config) -> Self {
         let xkb_context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
-        let xkb_keymap =
-            xkb::Keymap::new_from_names(&xkb_context, "", "", "us(dvp),ru", "", None, 0).unwrap();
+        let xkb_keymap = xkb::Keymap::new_from_names(
+            &xkb_context,
+            "",
+            "",
+            &config.xkb_layout,
+            "",
+            config.xkb_options.clone(),
+            0,
+        )
+        .unwrap();
         let keymap_string_ptr = unsafe {
             xkb::ffi::xkb_keymap_get_as_string(xkb_keymap.get_raw_ptr(), xkb::KEYMAP_FORMAT_TEXT_V1)
         };

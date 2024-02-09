@@ -46,6 +46,10 @@ The default config is
 # RGB color of the background
 bg_color = [0.2, 0.1, 0.2]
 
+# See `man xkeyboard-config`
+xkb_layout = "" # System's default layout
+# xkb_options = not set - i.e. the default options apply
+
 # Example of a pointer config
 #
 # [pointer.'1267-12541-ELAN071A:00_04F3:30FD_Touchpad']

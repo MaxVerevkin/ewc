@@ -159,14 +159,14 @@ impl Server {
             next_client_id: ClientId::first(),
             event_loop,
             state: State {
-                config,
                 globals,
                 backend,
                 cursor,
-                seat: Seat::new(),
+                seat: Seat::new(&config),
                 focus_stack: FocusStack::default(),
                 popup_stack: Vec::new(),
                 debugger: Debugger::default(),
+                config,
             },
         }
     }

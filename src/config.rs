@@ -8,6 +8,10 @@ use serde::Deserialize;
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
     pub bg_color: (f32, f32, f32),
+
+    pub xkb_layout: String,
+    pub xkb_options: Option<String>,
+
     pub pointer: HashMap<String, PointerConfig>,
 }
 
@@ -34,6 +38,8 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             bg_color: (0.2, 0.1, 0.2),
+            xkb_layout: String::new(),
+            xkb_options: None,
             pointer: HashMap::new(),
         }
     }

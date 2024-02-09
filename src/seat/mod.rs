@@ -4,6 +4,7 @@ use std::ffi::CString;
 use std::io;
 
 use crate::client::{ClientId, RequestCtx};
+use crate::config::Config;
 use crate::globals::{GlobalsManager, IsGlobal};
 use crate::protocol::*;
 use crate::wayland_core::Proxy;
@@ -38,9 +39,9 @@ impl Seat {
         globals.add_global::<WlDataDeviceManager>(3);
     }
 
-    pub fn new() -> Self {
+    pub fn new(config: &Config) -> Self {
         Self {
-            keyboard: keyboard::Keyboard::new(),
+            keyboard: keyboard::Keyboard::new(config),
             pointer: pointer::Pointer::new(),
             selection: None,
         }
