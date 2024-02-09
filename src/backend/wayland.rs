@@ -103,6 +103,12 @@ impl Backend for BackendImp {
 
     fn switch_vt(&mut self, _vt: u32) {}
 
+    fn pointer_get_name(&self, _id: PointerId) -> &str {
+        "wl_pointer"
+    }
+
+    fn pointer_set_tap_to_click(&mut self, _id: PointerId, _enable: bool) {}
+
     fn renderer_state(&mut self) -> &mut dyn RendererState {
         match &mut self.state.renderer_kind {
             RendererKind::Pixman { state, .. } => state,

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
 
@@ -7,6 +8,13 @@ use serde::Deserialize;
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
     pub bg_color: (f32, f32, f32),
+    pub pointer: HashMap<String, PointerConfig>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct PointerConfig {
+    pub tap_to_click: bool,
 }
 
 impl Config {
@@ -26,6 +34,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             bg_color: (0.2, 0.1, 0.2),
+            pointer: HashMap::new(),
         }
     }
 }

@@ -11,6 +11,7 @@ use drm::control::{AtomicCommitFlags, Device, FbCmd2Flags};
 use drm::Device as _;
 use input::event::keyboard::KeyboardEventTrait;
 use input::event::pointer::{PointerEventTrait, PointerScrollEvent};
+use input::event::EventTrait;
 use input::Libinput;
 
 use super::*;
@@ -258,6 +259,9 @@ pub fn new() -> Option<Box<dyn Backend>> {
         backend_events_queue: VecDeque::new(),
         fb_swapchain,
         renderer_kind,
+
+        next_input_id: NonZeroU64::MIN,
+        pointers: HashMap::new(),
     }))
 }
 
@@ -287,6 +291,14 @@ struct BackendImp {
     backend_events_queue: VecDeque<BackendEvent>,
     fb_swapchain: [drm::control::framebuffer::Handle; 2],
     renderer_kind: RendererKind,
+
+    next_input_id: NonZeroU64,
+    pointers: HashMap<PointerId, Pointer>,
+}
+
+struct Pointer {
+    device: input::Device,
+    ident: String,
 }
 
 struct LibinputIface {
@@ -461,7 +473,30 @@ impl Backend for BackendImp {
                 self.libinput.dispatch().unwrap();
                 for event in &mut self.libinput {
                     match event {
-                        input::Event::Device(_) => (),
+                        input::Event::Device(e) => match e {
+                            input::event::DeviceEvent::Added(e) => {
+                                let device = e.device();
+                                if device.has_capability(input::DeviceCapability::Pointer) {
+                                    let id = PointerId(next_id(&mut self.next_input_id));
+                                    self.pointers.insert(
+                                        id,
+                                        Pointer {
+                                            ident: format!(
+                                                "{}-{}-{}",
+                                                device.id_vendor(),
+                                                device.id_product(),
+                                                device.name().replace(' ', "_"),
+                                            ),
+                                            device,
+                                        },
+                                    );
+                                    self.backend_events_queue
+                                        .push_back(BackendEvent::NewPointer(id));
+                                }
+                            }
+                            input::event::DeviceEvent::Removed(_) => todo!(),
+                            _ => (),
+                        },
                         input::Event::Keyboard(e) => {
                             let input::event::KeyboardEvent::Key(e) = e else { continue };
                             let key = e.key();
@@ -560,6 +595,17 @@ impl Backend for BackendImp {
 
     fn switch_vt(&mut self, vt: u32) {
         self.seat.switch_session(vt as i32).unwrap();
+    }
+
+    fn pointer_get_name(&self, id: PointerId) -> &str {
+        &self.pointers.get(&id).unwrap().ident
+    }
+
+    fn pointer_set_tap_to_click(&mut self, id: PointerId, enable: bool) {
+        let ptr = self.pointers.get_mut(&id).unwrap();
+        if let Err(e) = ptr.device.config_tap_set_enabled(enable) {
+            eprintln!("failed to enable tap-to-click for {}: {e:?}", ptr.ident);
+        }
     }
 
     fn renderer_state(&mut self) -> &mut dyn RendererState {

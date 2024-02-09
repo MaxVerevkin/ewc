@@ -447,7 +447,15 @@ impl Server {
                     }
                     self.state.seat.keyboard.update_key(key, timestamp, false);
                 }
-                BackendEvent::NewPointer(_id) => (),
+                BackendEvent::NewPointer(id) => {
+                    let name = self.state.backend.pointer_get_name(id);
+                    eprintln!("new pointer: {name}");
+                    if let Some(config) = self.state.config.pointer.get(name) {
+                        self.state
+                            .backend
+                            .pointer_set_tap_to_click(id, config.tap_to_click);
+                    }
+                }
                 BackendEvent::PointerMotionAbsolute(_id, timestamp, x, y) => {
                     self.state.seat.pointer.x = x;
                     self.state.seat.pointer.y = y;
