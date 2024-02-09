@@ -24,6 +24,7 @@ use xkbcommon::xkb;
 mod backend;
 mod buffer_transform;
 mod client;
+mod config;
 mod cursor;
 mod event_loop;
 mod focus_stack;
@@ -34,6 +35,7 @@ mod wayland_core;
 
 use crate::backend::{Backend, BackendEvent, Color, RenderNode};
 use crate::client::{Client, ClientId};
+use crate::config::Config;
 use crate::cursor::Cursor;
 use crate::event_loop::EventLoop;
 use crate::focus_stack::FocusStack;
@@ -68,6 +70,7 @@ pub struct Server {
 }
 
 pub struct State {
+    pub config: Config,
     pub globals: GlobalsManager,
     pub backend: Box<dyn Backend>,
     pub seat: Seat,
@@ -121,6 +124,7 @@ impl Server {
     }
 
     pub fn new(socket_path: PathBuf) -> Self {
+        let config = Config::new();
         let mut backend = choose_backend();
         let socket = UnixListener::bind(&socket_path).unwrap();
         socket.set_nonblocking(true).unwrap();
@@ -157,6 +161,7 @@ impl Server {
             next_client_id: ClientId::first(),
             event_loop,
             state: State {
+                config,
                 globals,
                 backend,
                 cursor,
@@ -384,7 +389,12 @@ impl Server {
                         .unwrap()
                         .as_millis() as u32;
                     self.state.backend.render_frame(
-                        Color::from_rgba(0.2, 0.1, 0.2, 1.0),
+                        Color::from_rgba(
+                            self.state.config.bg_color.0,
+                            self.state.config.bg_color.1,
+                            self.state.config.bg_color.2,
+                            1.0,
+                        ),
                         &render_list,
                         time,
                     );

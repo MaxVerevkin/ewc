@@ -35,3 +35,14 @@ Wayland compositor from scratch in Rust.
 ## Environment variables
 
 - `EWC_NO_GL=1` to force software renderer.
+
+## Configuration
+
+Config file is located at `$XDG_CONFIG_HOME/ewc/config.toml` or `~/.config/ewc/config.toml`.
+
+The default config is
+
+```toml
+# RGB color of the background
+bg_color = [0.2, 0.1, 0.2]
+```
