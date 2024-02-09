@@ -429,11 +429,11 @@ fn wl_surface_cb(ctx: RequestCtx<WlSurface>) -> io::Result<()> {
     use wl_surface::Request;
     match ctx.request {
         Request::Destroy => {
-            if !matches!(
-                &*surface.role.borrow(),
-                SurfaceRole::None | SurfaceRole::Cursor,
-            ) {
-                return Err(io::Error::other("destroying wl_surface before role object"));
+            match &*surface.role.borrow() {
+                SurfaceRole::None | SurfaceRole::Cursor => (),
+                SurfaceRole::Subsurface(_) | SurfaceRole::Xdg(_) => {
+                    return Err(io::Error::other("destroying wl_surface before role object"));
+                }
             }
             for sub in &surface.pending.borrow().subsurfaces {
                 sub.surface.unmap(ctx.state);
@@ -456,67 +456,50 @@ fn wl_surface_cb(ctx: RequestCtx<WlSurface>) -> io::Result<()> {
         }
         Request::Damage(_) => (),
         Request::Frame(cb) => {
-            surface.pending.borrow_mut().frame_cbs.push(cb);
-            surface
-                .pending
-                .borrow_mut()
-                .mask
-                .set(CommittedMaskBit::FrameCb);
+            let mut pending = surface.pending.borrow_mut();
+            pending.frame_cbs.push(cb);
+            pending.mask.set(CommittedMaskBit::FrameCb);
         }
         Request::SetOpaqueRegion(reg_id) => {
-            surface.pending.borrow_mut().opaque_region = match reg_id {
+            let mut pending = surface.pending.borrow_mut();
+            pending.opaque_region = match reg_id {
                 Some(reg) => Some(ctx.client.compositor.regions.get(&reg).unwrap().clone()),
                 None => None,
             };
-            surface
-                .pending
-                .borrow_mut()
-                .mask
-                .set(CommittedMaskBit::OpaqueRegion);
+            pending.mask.set(CommittedMaskBit::OpaqueRegion);
         }
         Request::SetInputRegion(reg_id) => {
-            surface.pending.borrow_mut().input_region = match reg_id {
+            let mut pending = surface.pending.borrow_mut();
+            pending.input_region = match reg_id {
                 Some(reg) => Some(ctx.client.compositor.regions.get(&reg).unwrap().clone()),
                 None => None,
             };
-            surface
-                .pending
-                .borrow_mut()
-                .mask
-                .set(CommittedMaskBit::InputRegion);
+            pending.mask.set(CommittedMaskBit::InputRegion);
         }
         Request::Commit => {
-            if surface
-                .pending
-                .borrow()
-                .mask
-                .contains(CommittedMaskBit::Buffer)
-            {
-                surface.pending.borrow_mut().buffer =
-                    surface.pending_buffer.take().and_then(|pending_buffer| {
-                        if pending_buffer.is_alive() {
-                            Some(
-                                ctx.state
-                                    .backend
-                                    .renderer_state()
-                                    .buffer_commited(pending_buffer),
-                            )
-                        } else {
-                            None
-                        }
-                    });
+            let mut pending = surface.pending.borrow_mut();
+            if pending.mask.contains(CommittedMaskBit::Buffer) {
+                pending.buffer = surface.pending_buffer.take().and_then(|pending_buffer| {
+                    if pending_buffer.is_alive() {
+                        Some(
+                            ctx.state
+                                .backend
+                                .renderer_state()
+                                .buffer_commited(pending_buffer),
+                        )
+                    } else {
+                        None
+                    }
+                });
             }
 
             if surface.effective_is_sync() {
-                surface.pending.borrow_mut().apply_to_and_clear(
+                pending.apply_to_and_clear(
                     &mut surface.get_subsurface().unwrap().cached_state.borrow_mut(),
                     ctx.state,
                 );
             } else {
-                surface
-                    .pending
-                    .borrow_mut()
-                    .apply_to_and_clear(&mut surface.cur.borrow_mut(), ctx.state);
+                pending.apply_to_and_clear(&mut surface.cur.borrow_mut(), ctx.state);
                 surface.apply_cache(ctx.state)?;
 
                 match &*surface.role.borrow() {
