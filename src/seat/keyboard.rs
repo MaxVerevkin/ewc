@@ -11,12 +11,15 @@ use crate::config::Config;
 use crate::protocol::*;
 use crate::wayland_core::Proxy;
 
+use super::DataSource;
+
 pub struct Keyboard {
     keymap_file: File,
     keymap_file_size: u32,
     pub xkb_state: xkb::State,
     mods: ModsState,
-    pub(super) focused_surface: Option<WlSurface>,
+    focused_surface: Option<WlSurface>,
+    selection: Option<DataSource>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,6 +92,7 @@ impl Keyboard {
             mods: ModsState::get(&xkb_state),
             xkb_state,
             focused_surface: None,
+            selection: None,
         }
     }
 
@@ -110,7 +114,7 @@ impl Keyboard {
         Ok(())
     }
 
-    pub(super) fn focus_surface(&mut self, surface: Option<WlSurface>) {
+    pub fn focus_surface(&mut self, surface: Option<WlSurface>) {
         if self.focused_surface == surface {
             return;
         }
@@ -121,12 +125,22 @@ impl Keyboard {
             }
         }
 
+        let old_client_id = self.focused_surface.as_ref().map(|x| x.client_id());
         self.focused_surface = surface;
+
         if let Some(new_surf) = &self.focused_surface {
+            if old_client_id != Some(new_surf.client_id()) {
+                self.send_selection_to_focused();
+            }
+
             for kbd in new_surf.conn().seat.keyboards.borrow().iter() {
                 self.enter(kbd);
             }
         }
+    }
+
+    pub(super) fn focused_surface(&self) -> Option<WlSurface> {
+        self.focused_surface.clone()
     }
 
     fn enter(&self, wl_keyboard: &WlKeyboard) {
@@ -185,6 +199,35 @@ impl Keyboard {
                     .mod_get_index(xkb::MOD_NAME_LOGO))
                 != 0,
             alt: mask & (1 << self.xkb_state.get_keymap().mod_get_index(xkb::MOD_NAME_ALT)) != 0,
+        }
+    }
+
+    pub fn set_selection(&mut self, selection: Option<DataSource>) {
+        if let Some(old) = &self.selection {
+            old.wl.cancelled();
+        }
+        self.selection = selection;
+        self.send_selection_to_focused();
+    }
+
+    pub fn get_selection(&self) -> Option<&DataSource> {
+        self.selection.as_ref()
+    }
+
+    pub(super) fn send_selection(&self, data_device: &WlDataDevice) {
+        data_device.selection(
+            self.selection
+                .as_ref()
+                .map(|x| x.new_data_offer(data_device).unwrap())
+                .as_ref(),
+        );
+    }
+
+    fn send_selection_to_focused(&self) {
+        if let Some(focused) = &self.focused_surface {
+            for data_device in &*focused.conn().seat.data_devices.borrow() {
+                self.send_selection(data_device);
+            }
         }
     }
 }

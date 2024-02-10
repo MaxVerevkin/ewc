@@ -207,7 +207,10 @@ fn xdg_popup_cb(ctx: RequestCtx<XdgPopup>) -> io::Result<()> {
         }
         Request::Grab(_args) => {
             popup.grab.set(true);
-            ctx.state.seat.kbd_focus_surface(Some(surface.wl.clone()));
+            ctx.state
+                .seat
+                .keyboard
+                .focus_surface(Some(surface.wl.clone()));
         }
         Request::Reposition(args) => {
             ctx.proxy.repositioned(args.token);

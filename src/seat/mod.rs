@@ -16,7 +16,6 @@ pub mod pointer;
 pub struct Seat {
     pub keyboard: keyboard::Keyboard,
     pub pointer: pointer::Pointer,
-    pub selection: Option<DataSource>,
 }
 
 #[derive(Default)]
@@ -43,18 +42,16 @@ impl Seat {
         Self {
             keyboard: keyboard::Keyboard::new(config),
             pointer: pointer::Pointer::new(),
-            selection: None,
         }
     }
 
     pub fn remove_client(&mut self, client_id: ClientId) {
         if self
-            .selection
-            .as_ref()
+            .keyboard
+            .get_selection()
             .is_some_and(|x| x.wl.client_id() == client_id)
         {
-            self.selection = None;
-            self.send_selection_to_focused();
+            self.keyboard.set_selection(None);
         }
     }
 
@@ -62,56 +59,25 @@ impl Seat {
         self.keyboard.surface_unmapped(wl_surface);
         self.pointer.surface_unmapped(wl_surface);
     }
+}
 
-    pub fn kbd_focus_surface(&mut self, surface: Option<WlSurface>) {
-        if self.keyboard.focused_surface == surface {
-            return;
+impl DataSource {
+    fn new_data_offer(&self, data_device: &WlDataDevice) -> io::Result<WlDataOffer> {
+        let data_offer: WlDataOffer = data_device
+            .conn()
+            .create_servers_object(data_device.version())?;
+        data_offer.set_callback(wl_data_offer_cb);
+        data_device
+            .conn()
+            .seat
+            .data_offers
+            .borrow_mut()
+            .insert(data_offer.clone(), self.wl.clone());
+        data_device.data_offer(&data_offer);
+        for mime in &self.mime {
+            data_offer.offer(mime.clone());
         }
-        if let Some(surface) = &surface {
-            if self
-                .keyboard
-                .focused_surface
-                .as_ref()
-                .map_or(true, |old| old.client_id() != surface.client_id())
-            {
-                for data_device in &*surface.conn().seat.data_devices.borrow() {
-                    self.send_selection(data_device);
-                }
-            }
-        }
-        self.keyboard.focus_surface(surface);
-    }
-
-    pub fn send_selection_to_focused(&self) {
-        if let Some(focused) = &self.keyboard.focused_surface {
-            for data_device in &*focused.conn().seat.data_devices.borrow() {
-                self.send_selection(data_device);
-            }
-        }
-    }
-
-    pub fn send_selection(&self, data_device: &WlDataDevice) {
-        match &self.selection {
-            None => data_device.selection(None),
-            Some(selection) => {
-                let data_offer: WlDataOffer = data_device
-                    .conn()
-                    .create_servers_object(data_device.version())
-                    .unwrap();
-                data_offer.set_callback(wl_data_offer_cb);
-                data_device
-                    .conn()
-                    .seat
-                    .data_offers
-                    .borrow_mut()
-                    .insert(data_offer.clone(), selection.wl.clone());
-                data_device.data_offer(&data_offer);
-                for mime in &selection.mime {
-                    data_offer.offer(mime.clone());
-                }
-                data_device.selection(Some(&data_offer));
-            }
-        }
+        Ok(data_offer)
     }
 }
 
@@ -165,11 +131,10 @@ impl IsGlobal for WlDataDeviceManager {
                         .state
                         .seat
                         .keyboard
-                        .focused_surface
-                        .as_ref()
+                        .focused_surface()
                         .is_some_and(|x| x.client_id() == args.id.client_id())
                     {
-                        ctx.state.seat.send_selection(&args.id);
+                        ctx.state.seat.keyboard.send_selection(&args.id);
                     }
                     ctx.client.conn.seat.data_devices.borrow_mut().push(args.id);
                 }
@@ -191,9 +156,8 @@ fn wl_data_source_cb(ctx: RequestCtx<WlDataSource>) -> io::Result<()> {
                 .push(mime);
         }
         Request::Destroy => {
-            if ctx.state.seat.selection.as_ref().map(|x| &x.wl) == Some(&ctx.proxy) {
-                ctx.state.seat.selection = None;
-                ctx.state.seat.send_selection_to_focused();
+            if ctx.state.seat.keyboard.get_selection().map(|x| &x.wl) == Some(&ctx.proxy) {
+                ctx.state.seat.keyboard.set_selection(None);
             }
             ctx.client.data_sources.remove(&ctx.proxy);
         }
@@ -207,11 +171,7 @@ fn wl_data_device_cb(ctx: RequestCtx<WlDataDevice>) -> io::Result<()> {
     match ctx.request {
         Request::StartDrag(_) => todo!(),
         Request::SetSelection(args) => {
-            if let Some(old) = ctx.state.seat.selection.take() {
-                old.wl.cancelled();
-            }
-
-            ctx.state.seat.selection = match args.source {
+            ctx.state.seat.keyboard.set_selection(match args.source {
                 None => None,
                 Some(source) => Some(
                     ctx.client
@@ -219,9 +179,7 @@ fn wl_data_device_cb(ctx: RequestCtx<WlDataDevice>) -> io::Result<()> {
                         .remove(&source)
                         .ok_or_else(|| io::Error::other("used data usource"))?,
                 ),
-            };
-
-            ctx.state.seat.send_selection_to_focused();
+            });
         }
         Request::Release => {
             ctx.client

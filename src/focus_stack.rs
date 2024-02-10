@@ -85,7 +85,8 @@ impl FocusStack {
 
     pub fn focus_i(&mut self, i: usize, seat: &mut Seat) {
         let tl = self.inner.remove(i).upgrade().unwrap();
-        seat.kbd_focus_surface(Some(tl.wl_surface.upgrade().unwrap().wl.clone()));
+        seat.keyboard
+            .focus_surface(Some(tl.wl_surface.upgrade().unwrap().wl.clone()));
         self.inner.push(Rc::downgrade(&tl));
     }
 

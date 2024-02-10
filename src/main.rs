@@ -423,11 +423,11 @@ impl Server {
                         if let Some(popup) =
                             self.state.popup_stack.iter().rev().find(|p| p.grab.get())
                         {
-                            self.state.seat.kbd_focus_surface(Some(
+                            self.state.seat.keyboard.focus_surface(Some(
                                 popup.wl_surface.upgrade().unwrap().wl.clone(),
                             ));
                         } else if let Some(toplevel) = self.state.focus_stack.top() {
-                            self.state.seat.kbd_focus_surface(Some(
+                            self.state.seat.keyboard.focus_surface(Some(
                                 toplevel.wl_surface.upgrade().unwrap().wl.clone(),
                             ));
                         }
@@ -437,13 +437,15 @@ impl Server {
                 BackendEvent::KeyReleased(_id, timestamp, key) => {
                     if let Some(popup) = self.state.popup_stack.iter().rev().find(|p| p.grab.get())
                     {
-                        self.state.seat.kbd_focus_surface(Some(
-                            popup.wl_surface.upgrade().unwrap().wl.clone(),
-                        ));
+                        self.state
+                            .seat
+                            .keyboard
+                            .focus_surface(Some(popup.wl_surface.upgrade().unwrap().wl.clone()));
                     } else if let Some(toplevel) = self.state.focus_stack.top() {
-                        self.state.seat.kbd_focus_surface(Some(
-                            toplevel.wl_surface.upgrade().unwrap().wl.clone(),
-                        ));
+                        self.state
+                            .seat
+                            .keyboard
+                            .focus_surface(Some(toplevel.wl_surface.upgrade().unwrap().wl.clone()));
                     }
                     self.state.seat.keyboard.update_key(key, timestamp, false);
                 }
