@@ -22,14 +22,18 @@ Wayland compositor from scratch in Rust.
 ## Supported protocols
 
 - [ ] `wayland.xml` (partial)
+    - [ ] DnD
+    - [ ] `wl_output`
 - [ ] `xdg-shell.xml` (partial)
-    - [ ] Popups.
+    - [ ] Qt popups don't work (but GTK does)
+    - [ ] Proper popup positioning
+    - [ ] Popup dismissal
 - [x] `linux-dmabuf-v1.xml` (v3, when using GL renderer)
 - [x] `viewporter.xml`
 - [x] `single-pixel-buffer-v1.xml`
-- [ ] `fractional-scale-v1.xml`
-- [ ] `wlr-layer-shell-unstable-v1.xml`
 - [x] `cursor-shape-v1.xml`
+- [ ] `wlr-layer-shell-unstable-v1.xml`
+- [ ] `fractional-scale-v1.xml`
 
 
 ## Environment variables
