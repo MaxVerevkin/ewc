@@ -10,6 +10,7 @@ mod pixman_renderer;
 pub mod wayland;
 
 use crate::buffer_transform::BufferTransform;
+use crate::config::PointerConfig;
 use crate::globals::linux_dmabuf::DmaBufSpec;
 use crate::globals::shm::{ShmBufferSpec, ShmPool};
 use crate::protocol;
@@ -23,7 +24,7 @@ pub trait Backend {
     fn next_event(&mut self) -> Option<BackendEvent>;
     fn switch_vt(&mut self, vt: u32);
     fn pointer_get_name(&self, id: PointerId) -> Option<&str>;
-    fn pointer_set_tap_to_click(&mut self, id: PointerId, enable: bool);
+    fn pointer_configure(&mut self, id: PointerId, config: &PointerConfig);
     fn renderer_state(&mut self) -> &mut dyn RendererState;
     fn render_frame(&mut self, clear: Color, render_list: &[RenderNode], time: u32);
 }

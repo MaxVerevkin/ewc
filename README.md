@@ -58,4 +58,5 @@ xkb_layout = "" # System's default layout
 #
 # [pointer.'1267-12541-ELAN071A:00_04F3:30FD_Touchpad']
 # tap_to_click = true
+# natural_scroll = true
 ```

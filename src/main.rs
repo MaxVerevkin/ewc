@@ -453,9 +453,7 @@ impl Server {
                     if let Some(name) = self.state.backend.pointer_get_name(id) {
                         eprintln!("new pointer: id={id:?} name={name}");
                         if let Some(config) = self.state.config.pointer.get(name) {
-                            self.state
-                                .backend
-                                .pointer_set_tap_to_click(id, config.tap_to_click);
+                            self.state.backend.pointer_configure(id, config);
                         }
                     }
                 }

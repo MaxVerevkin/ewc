@@ -18,7 +18,8 @@ pub struct Config {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct PointerConfig {
-    pub tap_to_click: bool,
+    pub tap_to_click: Option<bool>,
+    pub natural_scroll: Option<bool>,
 }
 
 impl Config {

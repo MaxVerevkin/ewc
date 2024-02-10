@@ -107,7 +107,7 @@ impl Backend for BackendImp {
         Some("wl_pointer")
     }
 
-    fn pointer_set_tap_to_click(&mut self, _id: PointerId, _enable: bool) {}
+    fn pointer_configure(&mut self, _id: PointerId, _config: &PointerConfig) {}
 
     fn renderer_state(&mut self) -> &mut dyn RendererState {
         match &mut self.state.renderer_kind {

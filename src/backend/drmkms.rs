@@ -624,13 +624,18 @@ impl Backend for BackendImp {
         Some(&ptr.ident)
     }
 
-    fn pointer_set_tap_to_click(&mut self, id: PointerId, enable: bool) {
+    fn pointer_configure(&mut self, id: PointerId, config: &PointerConfig) {
         let Some(dev) = self.pointer_mapping.get_mut(&id) else { return };
-        if let Err(e) = dev.config_tap_set_enabled(enable) {
-            eprintln!(
-                "failed to set tap-to-click={enable} for {}: {e:?}",
-                self.pointers.get(dev).unwrap().ident
-            );
+        let ident = &self.pointers.get(dev).unwrap().ident;
+        if let Some(enable) = config.tap_to_click {
+            if let Err(e) = dev.config_tap_set_enabled(enable) {
+                eprintln!("failed to set tap-to-click={enable} for {ident}: {e:?}");
+            }
+        }
+        if let Some(enable) = config.natural_scroll {
+            if let Err(e) = dev.config_scroll_set_natural_scroll_enabled(enable) {
+                eprintln!("failed to set natural-scroll={enable} for {ident}: {e:?}");
+            }
         }
     }
 
