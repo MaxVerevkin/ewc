@@ -577,7 +577,21 @@ impl Backend for BackendImp {
                                         ),
                                     );
                                 }
-                                // input::event::PointerEvent::ScrollFinger(_) => todo!(),
+                                input::event::PointerEvent::ScrollFinger(e) => {
+                                    let vertical = e
+                                        .has_axis(input::event::pointer::Axis::Vertical)
+                                        .then(|| {
+                                            e.scroll_value(input::event::pointer::Axis::Vertical)
+                                        })
+                                        .unwrap_or(0.0);
+                                    self.backend_events_queue.push_back(
+                                        BackendEvent::PointerAxisVertial(
+                                            ptr.id,
+                                            timestamp,
+                                            vertical as f32,
+                                        ),
+                                    );
+                                }
                                 // input::event::PointerEvent::ScrollContinuous(_) => todo!(),
                                 _ => (),
                             }
