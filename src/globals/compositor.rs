@@ -35,10 +35,8 @@ impl Compositor {
     pub fn destroy(self, state: &mut State) {
         for surface in self.surfaces.values() {
             surface.unmap(state);
-            if let Some(subsurf) = surface.get_subsurface() {
-                if let Some(buf_id) = subsurf.cached_state.borrow().buffer {
-                    state.backend.renderer_state().buffer_unlock(buf_id);
-                }
+            if let Some(buf_id) = surface.cached_state.borrow().buffer {
+                state.backend.renderer_state().buffer_unlock(buf_id);
             }
             if let Some(buf_id) = surface.cur.borrow().buffer {
                 state.backend.renderer_state().buffer_unlock(buf_id);
@@ -52,6 +50,7 @@ pub struct Surface {
     pub role: RefCell<SurfaceRole>,
     pub cur: RefCell<SurfaceState>,
     pending: RefCell<SurfaceState>,
+    cached_state: RefCell<SurfaceState>,
     pub pending_buffer: Cell<Option<WlBuffer>>,
     viewport: Cell<Option<WpViewport>>,
     buf_transform: Cell<Option<BufferTransform>>,
@@ -165,6 +164,7 @@ impl Surface {
             role: RefCell::new(SurfaceRole::None),
             cur: RefCell::new(SurfaceState::default()),
             pending: RefCell::new(SurfaceState::default()),
+            cached_state: RefCell::new(SurfaceState::default()),
             pending_buffer: Cell::new(None),
             viewport: Cell::new(None),
             buf_transform: Cell::new(None),
@@ -294,23 +294,30 @@ impl Surface {
         }
     }
 
-    fn apply_cache(&self, state: &mut State) -> io::Result<()> {
-        if let Some(subs) = self.get_subsurface() {
-            subs.cached_state
-                .borrow_mut()
-                .apply_to_and_clear(&mut self.cur.borrow_mut(), state);
+    fn apply_state(&self, state: &mut State) -> io::Result<()> {
+        self.cached_state
+            .borrow_mut()
+            .apply_to_and_clear(&mut self.cur.borrow_mut(), state);
 
-            let has_buffer = self.cur.borrow().buffer.is_some();
-            if !has_buffer && self.mapped.get() {
-                self.unmap(state);
-            } else if has_buffer {
-                self.mapped.set(true);
-            }
-        }
         self.validate_and_update_buf_transform(state.backend.as_mut())?; // todo: run only if relevant data was updated
         for subs in &self.cur.borrow().subsurfaces {
-            subs.surface.apply_cache(state)?;
+            subs.surface.apply_state(state)?;
         }
+
+        match &*self.role.borrow() {
+            SurfaceRole::None => (),
+            SurfaceRole::Xdg(xdg) => xdg.committed(state)?,
+            SurfaceRole::Cursor => (),
+            SurfaceRole::Subsurface(_) => {
+                let has_buffer = self.cur.borrow().buffer.is_some();
+                if !has_buffer && self.mapped.get() {
+                    self.unmap(state);
+                } else if has_buffer {
+                    self.mapped.set(true);
+                }
+            }
+        }
+
         Ok(())
     }
 }
@@ -327,7 +334,6 @@ pub struct SubsurfaceRole {
     pub surface: Weak<Surface>,
     pub parent: Weak<Surface>,
     pub is_sync: Cell<bool>,
-    pub cached_state: RefCell<SurfaceState>,
 }
 
 impl IsGlobal for WlCompositor {
@@ -373,7 +379,6 @@ impl IsGlobal for WlSubcompositor {
                         surface: Rc::downgrade(surface),
                         parent: Rc::downgrade(parent),
                         is_sync: Cell::new(true),
-                        cached_state: RefCell::new(SurfaceState::default()),
                     });
                     *surface.role.borrow_mut() = SurfaceRole::Subsurface(subsurface.clone());
                     ctx.client
@@ -493,20 +498,10 @@ fn wl_surface_cb(ctx: RequestCtx<WlSurface>) -> io::Result<()> {
             }
 
             if surface.effective_is_sync() {
-                pending.apply_to_and_clear(
-                    &mut surface.get_subsurface().unwrap().cached_state.borrow_mut(),
-                    ctx.state,
-                );
+                pending.apply_to_and_clear(&mut surface.cached_state.borrow_mut(), ctx.state);
             } else {
                 pending.apply_to_and_clear(&mut surface.cur.borrow_mut(), ctx.state);
-                surface.apply_cache(ctx.state)?;
-
-                match &*surface.role.borrow() {
-                    SurfaceRole::None => (),
-                    SurfaceRole::Xdg(xdg) => xdg.committed(ctx.state)?,
-                    SurfaceRole::Cursor => (),
-                    SurfaceRole::Subsurface(_) => (),
-                }
+                surface.apply_state(ctx.state)?;
             }
         }
         Request::SetBufferTransform(transform) => {
@@ -553,13 +548,11 @@ fn wl_subsurface_cb(ctx: RequestCtx<WlSubsurface>) -> io::Result<()> {
                     .borrow_mut()
                     .subsurfaces
                     .retain(|node| node.surface.wl != surface.wl);
-                if let Some(parent_sub) = parent.get_subsurface() {
-                    parent_sub
-                        .cached_state
-                        .borrow_mut()
-                        .subsurfaces
-                        .retain(|node| node.surface.wl != surface.wl);
-                }
+                parent
+                    .cached_state
+                    .borrow_mut()
+                    .subsurfaces
+                    .retain(|node| node.surface.wl != surface.wl);
             }
         }
         Request::SetPosition(args) => {
@@ -609,7 +602,7 @@ fn wl_subsurface_cb(ctx: RequestCtx<WlSubsurface>) -> io::Result<()> {
         Request::SetDesync => {
             subsurface.is_sync.set(false);
             if subsurface.parent.upgrade().unwrap().effective_is_sync() {
-                surface.apply_cache(ctx.state)?;
+                surface.apply_state(ctx.state)?;
             }
         }
     }
