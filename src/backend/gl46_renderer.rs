@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::ffi::CStr;
 
 use eglgbm::{egl_ffi::eglGetProcAddress, BufferExport, FormatTable, Fourcc};
@@ -6,9 +5,7 @@ use wayrs_protocols::linux_dmabuf_unstable_v1::zwp_linux_dmabuf_feedback_v1::Tra
 use wayrs_utils::dmabuf_feedback::DmabufFeedback;
 
 use super::*;
-use crate::globals::shm::ShmPool;
 use crate::protocol::*;
-use crate::wl_shm;
 use crate::Proxy;
 
 const DRM_FORMAT_XRGB8888: Fourcc = Fourcc(u32::from_le_bytes(*b"XR24"));

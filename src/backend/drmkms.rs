@@ -1,5 +1,4 @@
-use std::collections::{HashMap, VecDeque};
-use std::io;
+use std::collections::VecDeque;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
 use std::path::Path;
 use std::rc::Rc;

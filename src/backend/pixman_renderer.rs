@@ -1,8 +1,4 @@
-use std::collections::HashMap;
-use std::num::NonZeroU64;
-
 use super::*;
-use crate::globals::shm::ShmPool;
 use crate::protocol::*;
 use crate::Proxy;
 

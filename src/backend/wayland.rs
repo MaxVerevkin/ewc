@@ -1,7 +1,5 @@
 use std::collections::VecDeque;
-use std::io;
-use std::num::NonZeroU64;
-use std::os::fd::{AsRawFd, RawFd};
+use std::os::fd::AsRawFd;
 
 use wayrs_client::global::{Global, GlobalsExt};
 use wayrs_client::proxy::Proxy as _;
