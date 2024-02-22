@@ -299,6 +299,13 @@ impl Surface {
             subs.cached_state
                 .borrow_mut()
                 .apply_to_and_clear(&mut self.cur.borrow_mut(), state);
+
+            let has_buffer = self.cur.borrow().buffer.is_some();
+            if !has_buffer && self.mapped.get() {
+                self.unmap(state);
+            } else if has_buffer {
+                self.mapped.set(true);
+            }
         }
         self.validate_and_update_buf_transform(state.backend.as_mut())?; // todo: run only if relevant data was updated
         for subs in &self.cur.borrow().subsurfaces {
