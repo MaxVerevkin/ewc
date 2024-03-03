@@ -15,10 +15,13 @@ use crate::seat::{ClientSeat, DataSource};
 use crate::wayland_core::*;
 use crate::{State, ToFlushSet};
 
+use wayrs_core::MessageBuffersPool;
+
 pub struct Connection {
     client_id: ClientId,
     to_flush_set: Rc<ToFlushSet>,
     socket: RefCell<BufferedSocket>,
+    msg_buf_pool: RefCell<MessageBuffersPool>,
     events_queue: RefCell<VecDeque<Message>>,
     resources: RefCell<ObjectStorage>,
     wl_display: WlDisplay,
@@ -51,7 +54,8 @@ impl Connection {
             Self {
                 client_id,
                 to_flush_set,
-                socket: RefCell::new(stream.into()),
+                socket: RefCell::new(BufferedSocket::from(stream)),
+                msg_buf_pool: RefCell::new(MessageBuffersPool::default()),
                 events_queue: RefCell::new(VecDeque::new()),
                 resources: RefCell::new(resources),
                 wl_display,
@@ -67,8 +71,9 @@ impl Connection {
     pub fn flush(&self) -> io::Result<()> {
         let mut eq = self.events_queue.borrow_mut();
         let mut socket = self.socket.borrow_mut();
+        let mut msg_buf_pool = self.msg_buf_pool.borrow_mut();
         while let Some(msg) = eq.pop_front() {
-            if let Err(e) = socket.write_message(msg, IoMode::Blocking) {
+            if let Err(e) = socket.write_message(msg, &mut msg_buf_pool, IoMode::Blocking) {
                 eq.push_front(e.msg);
                 return Err(e.err);
             }
@@ -106,7 +111,8 @@ impl Connection {
 
     fn recv_request(self: &Rc<Self>) -> io::Result<(Message, Object)> {
         let mut socket = self.socket.borrow_mut();
-        let header = socket.peek_message_header()?;
+        let mut msg_buf_pool = self.msg_buf_pool.borrow_mut();
+        let header = socket.peek_message_header(IoMode::NonBlocking)?;
         let object = self
             .get_object(header.object_id)
             .ok_or_else(|| io::Error::other("request for unknown object"))?;
@@ -116,7 +122,7 @@ impl Connection {
             .get(header.opcode as usize)
             .ok_or_else(|| io::Error::other("invalid request opcode"))?
             .signature;
-        let msg = socket.recv_message(header, signature)?;
+        let msg = socket.recv_message(header, signature, &mut msg_buf_pool, IoMode::NonBlocking)?;
         for (arg_i, arg) in msg.args.iter().enumerate() {
             if let &ArgValue::NewId(id) = arg {
                 let ArgType::NewId(iface) = signature[arg_i] else { unreachable!() };

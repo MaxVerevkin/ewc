@@ -124,13 +124,13 @@ dependencies = [
  "libc",
  "libseat",
  "memmap2",
- "nix",
  "pixman",
  "serde",
  "shmemfdrs",
  "signal-hook",
  "toml_edit",
  "wayrs-client",
+ "wayrs-core",
  "wayrs-protocols",
  "wayrs-utils",
  "xcursor",
@@ -524,6 +524,14 @@ dependencies = [
  "nix",
  "thiserror",
  "wayrs-scanner",
+]
+
+[[package]]
+name = "wayrs-core"
+version = "0.1.0"
+source = "git+https://github.com/MaxVerevkin/wayrs?rev=b836916#b83691603aae4d17c2266b9350d0f5443eef378f"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
