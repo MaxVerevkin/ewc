@@ -529,9 +529,11 @@ dependencies = [
 [[package]]
 name = "wayrs-core"
 version = "0.1.0"
-source = "git+https://github.com/MaxVerevkin/wayrs?rev=b836916#b83691603aae4d17c2266b9350d0f5443eef378f"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d97972fcda30d96f714e61f863c755ced605d56e1fd323d7f8502f417ca32c04"
 dependencies = [
  "libc",
+ "thiserror",
 ]
 
 [[package]]

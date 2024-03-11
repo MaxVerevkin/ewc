@@ -15,12 +15,13 @@ use crate::seat::{ClientSeat, DataSource};
 use crate::wayland_core::*;
 use crate::{State, ToFlushSet};
 
+use wayrs_core::transport::{PeekHeaderError, RecvMessageError};
 use wayrs_core::MessageBuffersPool;
 
 pub struct Connection {
     client_id: ClientId,
     to_flush_set: Rc<ToFlushSet>,
-    socket: RefCell<BufferedSocket>,
+    socket: RefCell<BufferedSocket<UnixStream>>,
     msg_buf_pool: RefCell<MessageBuffersPool>,
     events_queue: RefCell<VecDeque<Message>>,
     resources: RefCell<ObjectStorage>,
@@ -112,7 +113,12 @@ impl Connection {
     fn recv_request(self: &Rc<Self>) -> io::Result<(Message, Object)> {
         let mut socket = self.socket.borrow_mut();
         let mut msg_buf_pool = self.msg_buf_pool.borrow_mut();
-        let header = socket.peek_message_header(IoMode::NonBlocking)?;
+        let header = socket
+            .peek_message_header(IoMode::NonBlocking)
+            .map_err(|err| match err {
+                PeekHeaderError::Io(io) => io,
+                other => io::Error::new(io::ErrorKind::InvalidData, other),
+            })?;
         let object = self
             .get_object(header.object_id)
             .ok_or_else(|| io::Error::other("request for unknown object"))?;
@@ -122,7 +128,12 @@ impl Connection {
             .get(header.opcode as usize)
             .ok_or_else(|| io::Error::other("invalid request opcode"))?
             .signature;
-        let msg = socket.recv_message(header, signature, &mut msg_buf_pool, IoMode::NonBlocking)?;
+        let msg = socket
+            .recv_message(header, signature, &mut msg_buf_pool, IoMode::NonBlocking)
+            .map_err(|err| match err {
+                RecvMessageError::Io(io) => io,
+                other => io::Error::new(io::ErrorKind::InvalidData, other),
+            })?;
         for (arg_i, arg) in msg.args.iter().enumerate() {
             if let &ArgValue::NewId(id) = arg {
                 let ArgType::NewId(iface) = signature[arg_i] else { unreachable!() };
