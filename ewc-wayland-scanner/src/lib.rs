@@ -288,6 +288,8 @@ fn gen_interface(iface: Interface) -> TokenStream {
     quote! {
         #mod_doc
         pub mod #mod_name {
+            #![allow(clippy::empty_docs)]
+
             use crate::wayland_core::{Proxy, ObjectId, Object};
             use crate::client::{Connection, ClientId};
 
