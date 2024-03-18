@@ -1,12 +1,11 @@
 use std::io;
 use std::marker::PhantomData;
-use std::num::NonZeroU32;
 use std::rc::Rc;
 
 use crate::client::{ClientId, RequestCtx};
 use crate::protocol::wl_registry::BindArgs;
 use crate::protocol::*;
-use crate::wayland_core::{Interface, Object, ObjectId, Proxy};
+use crate::wayland_core::{Interface, Object, Proxy};
 use crate::{Client, State};
 
 pub mod compositor;
@@ -93,8 +92,8 @@ impl Global {
                 state: &mut State,
                 args: wl_registry::BindArgs,
             ) -> io::Result<()> {
-                let object_id = ObjectId(NonZeroU32::new(args.id_id).unwrap());
-                let object = Object::new(&client.conn, object_id, G::INTERFACE, args.id_version);
+                let (_iface, version, object_id) = args.id;
+                let object = Object::new(&client.conn, object_id, G::INTERFACE, version);
                 client.conn.register_clients_object(object.clone())?;
                 G::try_from(object).unwrap().on_bind(client, state);
                 Ok(())
@@ -120,10 +119,11 @@ impl Global {
     }
 
     pub fn bind(&self, client: &mut Client, state: &mut State, args: BindArgs) -> io::Result<()> {
-        if self.interface().name != args.id_interface.as_c_str() {
+        let (iface, version, _id) = &args.id;
+        if self.interface().name != iface.as_ref() {
             return Err(io::Error::other("wl_registry::bind with invalid interface"));
         }
-        if self.version() < args.id_version {
+        if self.version() < *version {
             return Err(io::Error::other("wl_registry::bind with invalid version"));
         }
         self.imp.bind(client, state, args)

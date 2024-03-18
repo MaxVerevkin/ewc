@@ -57,38 +57,7 @@ fn make_proxy_path(iface: impl AsRef<str>) -> TokenStream {
     quote! { super::#proxy_name }
 }
 
-fn gen_interface(mut iface: Interface) -> TokenStream {
-    for req in &mut iface.requests {
-        req.args = req
-            .args
-            .iter()
-            .cloned()
-            .flat_map(|arg| {
-                if matches!(arg.arg_type, ArgType::NewId { iface: None }) {
-                    vec![
-                        Argument {
-                            name: format!("{}_interface", arg.name),
-                            arg_type: ArgType::String { allow_null: false },
-                            summary: None,
-                        },
-                        Argument {
-                            name: format!("{}_version", arg.name),
-                            arg_type: ArgType::Uint,
-                            summary: None,
-                        },
-                        Argument {
-                            name: format!("{}_id", arg.name),
-                            arg_type: ArgType::Uint,
-                            summary: None,
-                        },
-                    ]
-                } else {
-                    vec![arg]
-                }
-            })
-            .collect();
-    }
-
+fn gen_interface(iface: Interface) -> TokenStream {
     let mod_doc = gen_doc(iface.description.as_ref(), None);
     let mod_name = syn::Ident::new(&iface.name, Span::call_site());
 
@@ -158,6 +127,15 @@ fn gen_interface(mut iface: Interface) -> TokenStream {
         let opcode = opcode as u16;
         let arg_ty = request.args.iter().map(map_arg_to_argval);
         let arg_names = request.args.iter().map(|arg| make_ident(&arg.name));
+        let arg_patterns = request.args.iter().map(|arg| match &arg.arg_type {
+            ArgType::NewId { iface: None } => {
+                quote! { _new_id_iface, _new_id_ver, _name_id }
+            }
+            _ => {
+                let x = make_ident(&arg.name);
+                quote!(#x)
+            }
+        });
         let arg_decode = request.args.iter().map(|arg| {
             let arg_name = make_ident(&arg.name);
             match &arg.arg_type {
@@ -167,6 +145,9 @@ fn gen_interface(mut iface: Interface) -> TokenStream {
                         Err(_) => return Err(crate::wayland_core::BadMessage),
                     }
                 },
+                ArgType::NewId { iface: None } => {
+                    quote! { (_new_id_iface, _new_id_ver, _name_id) }
+                }
                 ArgType::NewId{iface:Some(iface)}|ArgType::Object{iface:Some(iface),allow_null:false} => {
                     let proxy_path = make_proxy_path(iface);
                     quote!{
@@ -203,7 +184,6 @@ fn gen_interface(mut iface: Interface) -> TokenStream {
             1 => quote!(Request::#request_name(#( #arg_decode )*)),
             _ => {
                 let struct_name = format_ident!("{request_name}Args");
-                let arg_names = arg_names.clone();
                 quote!(Request::#request_name(#struct_name { #( #arg_names: #arg_decode, )* }))
             }
         };
@@ -213,7 +193,7 @@ fn gen_interface(mut iface: Interface) -> TokenStream {
                     return Err(crate::wayland_core::BadMessage);
                 }
                 let mut args = msg.args.into_iter();
-                #( let Some(crate::wayland_core::ArgValue::#arg_ty(#arg_names)) = args.next() else { return Err(crate::wayland_core::BadMessage) }; )*
+                #( let Some(crate::wayland_core::ArgValue::#arg_ty(#arg_patterns)) = args.next() else { return Err(crate::wayland_core::BadMessage) }; )*
                 Ok(#retval)
             }
         }
@@ -607,7 +587,9 @@ impl ArgExt for Argument {
             ArgType::Int => quote!(i32),
             ArgType::Uint => quote!(u32),
             ArgType::Fixed => quote!(crate::wayland_core::Fixed),
-            ArgType::NewId { iface: None } => unreachable!(),
+            ArgType::NewId { iface: None } => {
+                quote! { (::std::borrow::Cow<'static, ::std::ffi::CStr>, u32, ObjectId) }
+            }
             ArgType::NewId { iface: Some(iface) } => make_proxy_path(iface),
             ArgType::Object { iface, allow_null } => match (&iface, allow_null) {
                 (None, false) => quote!(Object),
