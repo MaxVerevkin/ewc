@@ -94,7 +94,7 @@ impl SurfaceState {
             dst.input_region = self.input_region.take();
         }
         if self.mask.contains(CommittedMaskBit::Subsurfaces) {
-            dst.subsurfaces = self.subsurfaces.clone();
+            dst.subsurfaces.clone_from(&self.subsurfaces);
         }
         if self.mask.contains(CommittedMaskBit::FrameCb) {
             dst.frame_cbs.extend_from_slice(&self.frame_cbs);
