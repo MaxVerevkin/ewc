@@ -197,21 +197,19 @@ impl XdgToplevelRole {
                 state.focus_stack.push(self);
                 surface.mapped.set(true);
             }
-        } else {
-            if surface.cur.borrow().buffer.is_none() {
-                surface.unmap(state);
-            } else if let Some((edge, x, y, serial)) = self.resizing.get() {
-                let geom = xdg_surface.get_window_geometry().unwrap();
-                let (nx, ny) = geom.get_opposite_edge_point(edge);
-                self.x.set(x - nx);
-                self.y.set(y - ny);
-                if xdg_surface
-                    .last_acked_configure
-                    .get()
-                    .is_some_and(|acked| acked.wrapping_sub(serial) as i32 >= 0)
-                {
-                    self.resizing.set(None);
-                }
+        } else if surface.cur.borrow().buffer.is_none() {
+            surface.unmap(state);
+        } else if let Some((edge, x, y, serial)) = self.resizing.get() {
+            let geom = xdg_surface.get_window_geometry().unwrap();
+            let (nx, ny) = geom.get_opposite_edge_point(edge);
+            self.x.set(x - nx);
+            self.y.set(y - ny);
+            if xdg_surface
+                .last_acked_configure
+                .get()
+                .is_some_and(|acked| acked.wrapping_sub(serial) as i32 >= 0)
+            {
+                self.resizing.set(None);
             }
         }
 

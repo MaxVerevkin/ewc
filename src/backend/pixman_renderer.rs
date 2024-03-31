@@ -334,9 +334,10 @@ impl Frame for FrameImp<'_> {
 }
 
 fn bytes_to_ints(bytes: &mut [u8]) -> &mut [u32] {
+    let bytes_len = bytes.len();
     let ptr = bytes.as_mut_ptr().cast::<u32>();
     assert!(ptr.is_aligned());
-    unsafe { std::slice::from_raw_parts_mut(bytes.as_mut_ptr().cast(), bytes.len() / 4) }
+    unsafe { std::slice::from_raw_parts_mut(ptr, bytes_len / 4) }
 }
 
 fn wl_format_to_pixman(format: wl_shm::Format) -> Option<pixman::FormatCode> {
@@ -345,7 +346,6 @@ fn wl_format_to_pixman(format: wl_shm::Format) -> Option<pixman::FormatCode> {
     match format {
         Wl::Argb8888 => Some(Pix::A8R8G8B8),
         Wl::Xrgb8888 => Some(Pix::X8R8G8B8),
-        // 0x34324241 => Some(Pix::A8B8G8R8),
         _ => None,
     }
 }

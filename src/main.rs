@@ -1,11 +1,3 @@
-#![allow(
-    unreachable_code,
-    clippy::new_without_default,
-    clippy::collapsible_else_if,
-    incomplete_features
-)]
-#![feature(inline_const_pat, pointer_is_aligned)]
-
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::env;

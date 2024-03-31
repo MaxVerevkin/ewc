@@ -18,6 +18,7 @@ pub const BTN_RIGHT: u32 = 0x111;
 // pub const BTN_BACK: u32 = 0x116;
 // pub const BTN_TASK: u32 = 0x117;
 
+#[derive(Default)]
 pub struct Pointer {
     pub state: PtrState,
     pub x: f32,
@@ -32,7 +33,9 @@ pub struct SurfacePointer {
     y: Fixed,
 }
 
+#[derive(Default)]
 pub enum PtrState {
+    #[default]
     None,
     Entered(SurfacePointer),
     Moving {
@@ -54,12 +57,7 @@ pub enum PtrState {
 
 impl Pointer {
     pub fn new() -> Self {
-        Self {
-            state: PtrState::None,
-            x: 0.0,
-            y: 0.0,
-            pressed_buttons: Vec::new(),
-        }
+        Self::default()
     }
 
     pub fn init_new_resource(&self, wl_pointer: &WlPointer) {
