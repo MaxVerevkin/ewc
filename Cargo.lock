@@ -3,12 +3,6 @@
 version = 3
 
 [[package]]
-name = "autocfg"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
-
-[[package]]
 name = "bitflags"
 version = "2.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -33,12 +27,6 @@ dependencies = [
  "quote",
  "syn",
 ]
-
-[[package]]
-name = "cfg-if"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
 name = "chlorine"
@@ -291,27 +279,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "memoffset"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a634b1c61a95585bd15607c6ab0c4e5b226e695ff2800ba0cdccddf208c406c"
-dependencies = [
- "autocfg",
-]
-
-[[package]]
-name = "nix"
-version = "0.27.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2eb04e9c688eff1c89d72b407f168cf79bb9e867a9d3323ed6c01519eb9cc053"
-dependencies = [
- "bitflags",
- "cfg-if",
- "libc",
- "memoffset",
-]
-
-[[package]]
 name = "paste"
 version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -517,20 +484,20 @@ checksum = "3354b9ac3fae1ff6755cb6db53683adb661634f67557942dea4facebec0fee4b"
 
 [[package]]
 name = "wayrs-client"
-version = "1.0.2"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47dafedf9cea6c2a27479d015848a7874cd7eed0d71461b9ace072f2cf4a21a2"
+checksum = "c2fe9b4b50232be51af04c96bbe5888f272014e3550ba4370185f2cbba3de58d"
 dependencies = [
- "nix",
  "thiserror",
+ "wayrs-core",
  "wayrs-scanner",
 ]
 
 [[package]]
 name = "wayrs-core"
-version = "0.1.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d97972fcda30d96f714e61f863c755ced605d56e1fd323d7f8502f417ca32c04"
+checksum = "443dab45c512423f367455e76dbf97196ecac5bb2bfbbf714b797fbc7be140b2"
 dependencies = [
  "libc",
  "thiserror",
@@ -557,9 +524,9 @@ dependencies = [
 
 [[package]]
 name = "wayrs-scanner"
-version = "0.13.2"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e387d47549e37bd2a6f03973a77578bb003f661559a096c9274b5b9bcd78bf1f"
+checksum = "59b21c1bc712edfa6260dceff75d224331d89bc8757b19ce771ebc35ba33e1d0"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
