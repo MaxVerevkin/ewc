@@ -24,7 +24,7 @@ libc = "0.2"
 memmap2 = "0.8"
 pixman = "0.1"
 serde = { version = "1.0", features = ["derive"] }
-shmemfdrs = "0.1.4"
+shmemfdrs2 = "1.0"
 signal-hook = "0.3"
 toml_edit = { version = "0.21", features = ["serde"] }
 wayrs-core = "1.0"
@@ -37,7 +37,7 @@ gl46 = "0.2"
 
 wayrs-client = "1.0"
 wayrs-protocols = { version = "0.13", features = ["xdg-shell", "linux-dmabuf-unstable-v1"] }
-wayrs-utils = { version = "0.13", features = ["shm_alloc", "seats", "cursor", "dmabuf_feedback"] }
+wayrs-utils = { version = "0.14", features = ["shm_alloc", "seats", "cursor", "dmabuf_feedback"] }
 
 [patch.crates-io]
 pixman = { git = "https://github.com/cmeissl/pixman-rs", rev = "a7bf452" }

@@ -128,15 +128,17 @@ impl Backend for BackendImp {
 
         match &mut self.state.renderer_kind {
             RendererKind::Pixman { shm, state } => {
-                let (buffer, canvas) = shm.alloc_buffer(
-                    &mut self.conn,
-                    BufferSpec {
-                        width: self.state.width,
-                        height: self.state.height,
-                        stride: self.state.width * 4,
-                        format: wl_shm::Format::Argb8888,
-                    },
-                );
+                let (buffer, canvas) = shm
+                    .alloc_buffer(
+                        &mut self.conn,
+                        BufferSpec {
+                            width: self.state.width,
+                            height: self.state.height,
+                            stride: self.state.width * 4,
+                            format: wl_shm::Format::Argb8888,
+                        },
+                    )
+                    .unwrap();
                 let mut frame = state.frame(
                     canvas,
                     self.state.width,

@@ -1,7 +1,7 @@
-use std::ffi::{CStr, CString};
+use std::ffi::CStr;
 use std::fs::File;
 use std::io::{self, Write};
-use std::os::fd::{AsFd, FromRawFd};
+use std::os::fd::AsFd;
 
 use xkbcommon::xkb;
 
@@ -76,12 +76,7 @@ impl Keyboard {
         assert!(!keymap_string_ptr.is_null());
         let keymap_string = unsafe { CStr::from_ptr(keymap_string_ptr) };
         let keymap_bytes = keymap_string.to_bytes_with_nul();
-        let mut keymap_file = unsafe {
-            File::from_raw_fd(shmemfdrs::create_shmem(
-                CString::new("/ewc-keymap-file").unwrap(),
-                keymap_bytes.len(),
-            ))
-        };
+        let mut keymap_file = shmemfdrs2::create_shmem(c"/ewc-keymap-file").unwrap();
         keymap_file.write_all(keymap_bytes).unwrap();
         let keymap_file_size = keymap_bytes.len() as u32;
         unsafe { libc::free(keymap_string_ptr.cast()) };
