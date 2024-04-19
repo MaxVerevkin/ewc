@@ -2,6 +2,7 @@ use std::io;
 use std::num::NonZeroU32;
 
 use crate::client::RequestCtx;
+use crate::protocol::xdg_positioner::ConstraintAdjustment;
 use crate::protocol::*;
 
 #[derive(Debug, Clone, Copy)]
@@ -11,7 +12,7 @@ pub struct Positioner {
     pub offset: (i32, i32),
     pub anchor: Option<xdg_positioner::Anchor>,
     pub gravity: Option<xdg_positioner::Gravity>,
-    pub contraint_adjustment: u32,
+    pub contraint_adjustment: ConstraintAdjustment,
     pub reactive: bool,
 }
 
@@ -22,7 +23,7 @@ pub struct RawPositioner {
     offset: (i32, i32),
     anchor: Option<xdg_positioner::Anchor>,
     gravity: Option<xdg_positioner::Gravity>,
-    contraint_adjustment: u32,
+    contraint_adjustment: ConstraintAdjustment,
     reactive: bool,
 }
 
