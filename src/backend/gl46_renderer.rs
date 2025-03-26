@@ -576,31 +576,33 @@ impl Framebuffer {
     }
 
     unsafe fn new(egl_image: eglgbm::EglImage, gl: &gl46::GlFns) -> Self {
-        let mut fbo = 0;
-        let mut rbo = 0;
+        unsafe {
+            let mut fbo = 0;
+            let mut rbo = 0;
 
-        gl.GenFramebuffers(1, &mut fbo);
-        gl.GenRenderbuffers(1, &mut rbo);
+            gl.GenFramebuffers(1, &mut fbo);
+            gl.GenRenderbuffers(1, &mut rbo);
 
-        gl.BindFramebuffer(gl46::GL_FRAMEBUFFER, fbo);
-        gl.BindRenderbuffer(gl46::GL_RENDERBUFFER, rbo);
-        gl.DrawBuffers(1, &gl46::GL_COLOR_ATTACHMENT0);
+            gl.BindFramebuffer(gl46::GL_FRAMEBUFFER, fbo);
+            gl.BindRenderbuffer(gl46::GL_RENDERBUFFER, rbo);
+            gl.DrawBuffers(1, &gl46::GL_COLOR_ATTACHMENT0);
 
-        egl_image.set_as_gl_renderbuffer_storage();
+            egl_image.set_as_gl_renderbuffer_storage();
 
-        gl.FramebufferRenderbuffer(
-            gl46::GL_FRAMEBUFFER,
-            gl46::GL_COLOR_ATTACHMENT0,
-            gl46::GL_RENDERBUFFER,
-            rbo,
-        );
+            gl.FramebufferRenderbuffer(
+                gl46::GL_FRAMEBUFFER,
+                gl46::GL_COLOR_ATTACHMENT0,
+                gl46::GL_RENDERBUFFER,
+                rbo,
+            );
 
-        assert_eq!(
-            gl.CheckNamedFramebufferStatus(fbo, gl46::GL_FRAMEBUFFER),
-            gl46::GL_FRAMEBUFFER_COMPLETE
-        );
+            assert_eq!(
+                gl.CheckNamedFramebufferStatus(fbo, gl46::GL_FRAMEBUFFER),
+                gl46::GL_FRAMEBUFFER_COMPLETE
+            );
 
-        Self { fbo, rbo }
+            Self { fbo, rbo }
+        }
     }
 }
 
@@ -641,7 +643,8 @@ fn filter_format_table(egl: &eglgbm::EglDisplay, format_table: &FormatTable) -> 
 }
 
 unsafe fn create_shader(gl: &gl46::GlFns, texture_units: u32) -> u32 {
-    let vertex_shader = b"
+    unsafe {
+        let vertex_shader = b"
         #version 460 core
         layout(location = 0) in vec2 a_Pos;
         layout(location = 1) in vec4 a_Color;
@@ -652,8 +655,8 @@ unsafe fn create_shader(gl: &gl46::GlFns, texture_units: u32) -> u32 {
             v_Color = a_Color;
         }\0";
 
-    let fragment_shader = format!(
-        "#version 460 core
+        let fragment_shader = format!(
+            "#version 460 core
         in vec4 v_Color;
         out vec4 frag_color;
         layout(location = 1) uniform sampler2D u_Textures[{texture_units}];
@@ -665,58 +668,63 @@ unsafe fn create_shader(gl: &gl46::GlFns, texture_units: u32) -> u32 {
                 frag_color = v_Color;
             }}
         }}\0"
-    );
+        );
 
-    let vs = gl.CreateShader(gl46::GL_VERTEX_SHADER);
-    gl.ShaderSource(vs, 1, &(vertex_shader.as_ptr() as _), std::ptr::null());
-    gl.CompileShader(vs);
-    assert_shader_ok(gl, vs);
+        let vs = gl.CreateShader(gl46::GL_VERTEX_SHADER);
+        gl.ShaderSource(vs, 1, &(vertex_shader.as_ptr() as _), std::ptr::null());
+        gl.CompileShader(vs);
+        assert_shader_ok(gl, vs);
 
-    let fs = gl.CreateShader(gl46::GL_FRAGMENT_SHADER);
-    gl.ShaderSource(fs, 1, &(fragment_shader.as_ptr() as _), std::ptr::null());
-    gl.CompileShader(fs);
-    assert_shader_ok(gl, fs);
+        let fs = gl.CreateShader(gl46::GL_FRAGMENT_SHADER);
+        gl.ShaderSource(fs, 1, &(fragment_shader.as_ptr() as _), std::ptr::null());
+        gl.CompileShader(fs);
+        assert_shader_ok(gl, fs);
 
-    let program = gl.CreateProgram();
-    gl.AttachShader(program, fs);
-    gl.AttachShader(program, vs);
-    gl.LinkProgram(program);
-    assert_shader_program_ok(gl, program);
+        let program = gl.CreateProgram();
+        gl.AttachShader(program, fs);
+        gl.AttachShader(program, vs);
+        gl.LinkProgram(program);
+        assert_shader_program_ok(gl, program);
 
-    gl.DeleteShader(fs);
-    gl.DeleteShader(vs);
+        gl.DeleteShader(fs);
+        gl.DeleteShader(vs);
 
-    program
+        program
+    }
 }
 
 unsafe fn assert_shader_ok(gl: &gl46::GlFns, shader: u32) {
-    let mut success = 0;
-    gl.GetShaderiv(shader, gl46::GL_COMPILE_STATUS, &mut success);
+    unsafe {
+        let mut success = 0;
+        gl.GetShaderiv(shader, gl46::GL_COMPILE_STATUS, &mut success);
 
-    if success != 1 {
-        let mut log = [0u8; 1024];
-        let mut len = 0;
-        gl.GetShaderInfoLog(shader, log.len() as _, &mut len, log.as_mut_ptr() as *mut _);
-        let msg = std::str::from_utf8(&log[..len as usize]).unwrap();
-        panic!("Shader error:\n{msg}");
+        if success != 1 {
+            let mut log = [0u8; 1024];
+            let mut len = 0;
+            gl.GetShaderInfoLog(shader, log.len() as _, &mut len, log.as_mut_ptr() as *mut _);
+            let msg = std::str::from_utf8(&log[..len as usize]).unwrap();
+            panic!("Shader error:\n{msg}");
+        }
     }
 }
 
 unsafe fn assert_shader_program_ok(gl: &gl46::GlFns, shader_program: u32) {
-    let mut success = 0;
-    gl.GetProgramiv(shader_program, gl46::GL_LINK_STATUS, &mut success);
+    unsafe {
+        let mut success = 0;
+        gl.GetProgramiv(shader_program, gl46::GL_LINK_STATUS, &mut success);
 
-    if success != 1 {
-        let mut log = [0u8; 1024];
-        let mut len = 0;
-        gl.GetProgramInfoLog(
-            shader_program,
-            log.len() as _,
-            &mut len,
-            log.as_mut_ptr() as *mut _,
-        );
-        let msg = std::str::from_utf8(&log[..len as usize]).unwrap();
-        panic!("Shader program error:\n{msg}");
+        if success != 1 {
+            let mut log = [0u8; 1024];
+            let mut len = 0;
+            gl.GetProgramInfoLog(
+                shader_program,
+                log.len() as _,
+                &mut len,
+                log.as_mut_ptr() as *mut _,
+            );
+            let msg = std::str::from_utf8(&log[..len as usize]).unwrap();
+            panic!("Shader program error:\n{msg}");
+        }
     }
 }
 
@@ -757,43 +765,45 @@ unsafe fn create_texture(
     format: wl_shm::Format,
     bytes: &[u8],
 ) -> u32 {
-    let mut tex = 0;
-    gl.CreateTextures(gl46::GL_TEXTURE_2D, 1, &mut tex);
-    gl.TextureParameteri(tex, gl46::GL_TEXTURE_MIN_FILTER, gl46::GL_NEAREST.0 as i32);
-    gl.TextureParameteri(tex, gl46::GL_TEXTURE_MAG_FILTER, gl46::GL_NEAREST.0 as i32);
-    gl.TextureParameteri(
-        tex,
-        gl46::GL_TEXTURE_WRAP_S,
-        gl46::GL_CLAMP_TO_EDGE.0 as i32,
-    );
-    gl.TextureParameteri(
-        tex,
-        gl46::GL_TEXTURE_WRAP_T,
-        gl46::GL_CLAMP_TO_EDGE.0 as i32,
-    );
-    gl.TextureStorage2D(
-        tex,
-        1,
-        match format {
-            wl_shm::Format::Argb8888 => gl46::GL_RGBA8,
-            wl_shm::Format::Xrgb8888 => gl46::GL_RGB8,
-            _ => panic!("unsupported wl format"),
-        },
-        width as i32,
-        height as i32,
-    );
-    gl.PixelStorei(gl46::GL_UNPACK_ROW_LENGTH, stride as i32 / 4);
-    gl.TextureSubImage2D(
-        tex,
-        0,
-        0,
-        0,
-        width as i32,
-        height as i32,
-        gl46::GL_BGRA,
-        gl46::GL_UNSIGNED_BYTE,
-        bytes.as_ptr().cast(),
-    );
-    gl.PixelStorei(gl46::GL_UNPACK_ROW_LENGTH, 0);
-    tex
+    unsafe {
+        let mut tex = 0;
+        gl.CreateTextures(gl46::GL_TEXTURE_2D, 1, &mut tex);
+        gl.TextureParameteri(tex, gl46::GL_TEXTURE_MIN_FILTER, gl46::GL_NEAREST.0 as i32);
+        gl.TextureParameteri(tex, gl46::GL_TEXTURE_MAG_FILTER, gl46::GL_NEAREST.0 as i32);
+        gl.TextureParameteri(
+            tex,
+            gl46::GL_TEXTURE_WRAP_S,
+            gl46::GL_CLAMP_TO_EDGE.0 as i32,
+        );
+        gl.TextureParameteri(
+            tex,
+            gl46::GL_TEXTURE_WRAP_T,
+            gl46::GL_CLAMP_TO_EDGE.0 as i32,
+        );
+        gl.TextureStorage2D(
+            tex,
+            1,
+            match format {
+                wl_shm::Format::Argb8888 => gl46::GL_RGBA8,
+                wl_shm::Format::Xrgb8888 => gl46::GL_RGB8,
+                _ => panic!("unsupported wl format"),
+            },
+            width as i32,
+            height as i32,
+        );
+        gl.PixelStorei(gl46::GL_UNPACK_ROW_LENGTH, stride as i32 / 4);
+        gl.TextureSubImage2D(
+            tex,
+            0,
+            0,
+            0,
+            width as i32,
+            height as i32,
+            gl46::GL_BGRA,
+            gl46::GL_UNSIGNED_BYTE,
+            bytes.as_ptr().cast(),
+        );
+        gl.PixelStorei(gl46::GL_UNPACK_ROW_LENGTH, 0);
+        tex
+    }
 }
