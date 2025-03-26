@@ -581,7 +581,7 @@ fn main() {
 
     println!("Running on {socket_name}");
     std::env::set_var("WAYLAND_DISPLAY", socket_name);
-    std::process::Command::new("foot").spawn().unwrap();
+    std::process::Command::new("alacritty").spawn().unwrap();
 
     loop {
         match server.event_loop.poll().unwrap() {
