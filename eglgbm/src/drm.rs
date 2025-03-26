@@ -1,5 +1,5 @@
 use libc::dev_t;
-use std::ffi::{c_int, CStr};
+use std::ffi::{CStr, c_int};
 use std::io;
 
 // use crate::xf86drm_ffi;
@@ -77,7 +77,7 @@ mod ffi {
 
     pub type drmDevicePtr = *mut drmDevice;
 
-    extern "C" {
+    unsafe extern "C" {
         pub fn drmGetDeviceFromDevId(
             dev_id: libc::dev_t,
             flags: u32,

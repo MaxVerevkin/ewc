@@ -1,6 +1,6 @@
 use super::*;
-use crate::protocol::*;
 use crate::Proxy;
+use crate::protocol::*;
 
 pub struct RendererStateImp {
     shm_pools: HashMap<WlShmPool, ShmPool>,
@@ -232,8 +232,8 @@ impl Frame for FrameImp<'_> {
         x: i32,
         y: i32,
     ) {
-        let t;
-        let t2;
+        let mut t;
+        let mut t2;
 
         let buf = &self.state.buffers[&buf_transform.buf_id()];
         let (src, tex_width, tex_height) = match &buf.kind {
@@ -253,7 +253,7 @@ impl Frame for FrameImp<'_> {
                     )
                     .unwrap()
                 };
-                (&*t, spec.width, spec.height)
+                (&mut *t, spec.width, spec.height)
             }
             BufferKind::Argb8Texture(w, h, bytes) => {
                 t = unsafe {
@@ -267,13 +267,13 @@ impl Frame for FrameImp<'_> {
                     )
                     .unwrap()
                 };
-                (&*t, *w, *h)
+                (&mut *t, *w, *h)
             }
             BufferKind::SinglePix(color, _) => {
                 t2 =
                     pixman::Solid::new(pixman::Color::from_f32(color.r, color.g, color.b, color.a))
                         .unwrap();
-                (&*t2, 1, 1)
+                (&mut *t2, 1, 1)
             }
         };
 

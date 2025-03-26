@@ -1,9 +1,9 @@
 use std::io;
 
 use super::{GlobalsManager, IsGlobal};
+use crate::Proxy;
 use crate::client::RequestCtx;
 use crate::protocol::*;
-use crate::Proxy;
 
 pub fn register_global(globals: &mut GlobalsManager) {
     globals.add_global::<WpCursorShapeManagerV1>(1);

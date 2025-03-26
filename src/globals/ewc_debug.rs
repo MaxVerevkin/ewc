@@ -1,9 +1,9 @@
 use std::{ffi::CString, time::Duration};
 
 use crate::{
+    Proxy, State,
     client::{Client, ClientId},
     protocol::*,
-    Proxy, State,
 };
 
 use super::IsGlobal;

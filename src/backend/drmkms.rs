@@ -3,15 +3,15 @@ use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
 use std::path::Path;
 use std::rc::Rc;
 
+use drm::Device as _;
 use drm::buffer::{Buffer as _, DrmFourcc};
 use drm::control::atomic::AtomicModeReq;
 use drm::control::dumbbuffer::DumbBuffer;
 use drm::control::{AtomicCommitFlags, Device, FbCmd2Flags};
-use drm::Device as _;
+use input::Libinput;
+use input::event::EventTrait;
 use input::event::keyboard::KeyboardEventTrait;
 use input::event::pointer::{PointerEventTrait, PointerScrollEvent};
-use input::event::EventTrait;
-use input::Libinput;
 
 use super::*;
 use crate::protocol::wl_shm;
@@ -559,15 +559,18 @@ impl Backend for BackendImp {
                                 }
                                 // input::event::PointerEvent::Axis(_) => todo!(),
                                 input::event::PointerEvent::ScrollWheel(scroll_wheel) => {
-                                    assert!(!scroll_wheel
-                                        .has_axis(input::event::pointer::Axis::Horizontal));
-                                    let value = scroll_wheel
+                                    assert!(
+                                        !scroll_wheel
+                                            .has_axis(input::event::pointer::Axis::Horizontal)
+                                    );
+                                    let value = if scroll_wheel
                                         .has_axis(input::event::pointer::Axis::Vertical)
-                                        .then(|| {
-                                            scroll_wheel
-                                                .scroll_value(input::event::pointer::Axis::Vertical)
-                                        })
-                                        .unwrap_or(0.0);
+                                    {
+                                        scroll_wheel
+                                            .scroll_value(input::event::pointer::Axis::Vertical)
+                                    } else {
+                                        0.0
+                                    };
                                     self.backend_events_queue.push_back(
                                         BackendEvent::PointerAxisVertial(
                                             ptr.id,
@@ -577,12 +580,12 @@ impl Backend for BackendImp {
                                     );
                                 }
                                 input::event::PointerEvent::ScrollFinger(e) => {
-                                    let vertical = e
-                                        .has_axis(input::event::pointer::Axis::Vertical)
-                                        .then(|| {
+                                    let vertical =
+                                        if e.has_axis(input::event::pointer::Axis::Vertical) {
                                             e.scroll_value(input::event::pointer::Axis::Vertical)
-                                        })
-                                        .unwrap_or(0.0);
+                                        } else {
+                                            0.0
+                                        };
                                     self.backend_events_queue.push_back(
                                         BackendEvent::PointerAxisVertial(
                                             ptr.id,

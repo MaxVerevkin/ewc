@@ -31,15 +31,15 @@ use crate::config::Config;
 use crate::cursor::Cursor;
 use crate::event_loop::EventLoop;
 use crate::focus_stack::FocusStack;
+use crate::globals::GlobalsManager;
 use crate::globals::compositor::{Compositor, Surface};
 use crate::globals::ewc_debug::Debugger;
 use crate::globals::linux_dmabuf::LinuxDmabuf;
-use crate::globals::GlobalsManager;
 use crate::protocol::wp_cursor_shape_device_v1::Shape;
 use crate::protocol::xdg_toplevel::ResizeEdge;
 use crate::protocol::*;
-use crate::seat::pointer::{PtrState, BTN_LEFT, BTN_RIGHT};
 use crate::seat::Seat;
+use crate::seat::pointer::{BTN_LEFT, BTN_RIGHT, PtrState};
 use crate::wayland_core::*;
 
 #[macro_export]
@@ -404,7 +404,8 @@ impl Server {
                     } else if self.state.seat.keyboard.get_mods().logo
                         && keysym == xkb::Keysym::Return
                     {
-                        std::process::Command::new("foot").spawn().unwrap();
+                        #[expect(clippy::zombie_processes)] // don't care
+                        std::process::Command::new("alacritty").spawn().unwrap();
                     } else if keysym >= xkb::Keysym::XF86_Switch_VT_1
                         && keysym <= xkb::Keysym::XF86_Switch_VT_12
                     {
@@ -580,7 +581,8 @@ fn main() {
         .unwrap();
 
     println!("Running on {socket_name}");
-    std::env::set_var("WAYLAND_DISPLAY", socket_name);
+    unsafe { std::env::set_var("WAYLAND_DISPLAY", socket_name) };
+    #[expect(clippy::zombie_processes)] // don't care
     std::process::Command::new("alacritty").spawn().unwrap();
 
     loop {

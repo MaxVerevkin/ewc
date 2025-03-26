@@ -1,9 +1,9 @@
 use std::io;
 use std::num::NonZeroU32;
 
+use crate::Fixed;
 use crate::backend::{Backend, BufferId};
 use crate::protocol::wl_output;
-use crate::Fixed;
 
 #[derive(Clone, Copy)]
 pub struct BufferTransform {

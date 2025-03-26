@@ -528,7 +528,7 @@ trait ArgExt {
 impl ArgExt for Argument {
     fn as_event_fn_arg(&self) -> TokenStream {
         let arg_name = make_ident(&self.name);
-        let retval = match &self.arg_type {
+        match &self.arg_type {
             ArgType::Int => quote!(#arg_name: i32),
             ArgType::Uint => quote!(#arg_name: u32),
             ArgType::Enum(enum_ty) => {
@@ -570,8 +570,7 @@ impl ArgExt for Argument {
             },
             ArgType::Array => quote!(#arg_name: ::std::vec::Vec<u8>),
             ArgType::Fd => quote!(#arg_name: ::std::os::fd::OwnedFd),
-        };
-        retval
+        }
     }
 
     fn as_request_ty(&self) -> TokenStream {

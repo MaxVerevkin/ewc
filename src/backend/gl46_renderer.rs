@@ -1,12 +1,12 @@
 use std::ffi::CStr;
 
-use eglgbm::{egl_ffi::eglGetProcAddress, BufferExport, FormatTable, Fourcc};
-use wayrs_protocols::linux_dmabuf_unstable_v1::zwp_linux_dmabuf_feedback_v1::TrancheFlags;
+use eglgbm::{BufferExport, FormatTable, Fourcc, egl_ffi::eglGetProcAddress};
+use wayrs_protocols::linux_dmabuf_v1::zwp_linux_dmabuf_feedback_v1::TrancheFlags;
 use wayrs_utils::dmabuf_feedback::DmabufFeedback;
 
 use super::*;
-use crate::protocol::*;
 use crate::Proxy;
+use crate::protocol::*;
 
 const DRM_FORMAT_XRGB8888: Fourcc = Fourcc(u32::from_le_bytes(*b"XR24"));
 
@@ -50,7 +50,7 @@ struct GlTexture {
 }
 
 impl RendererStateImp {
-    pub fn new(render_node: &CStr, feedback: DmabufFeedback) -> Option<Self> {
+    pub fn new(render_node: &CStr, feedback: &DmabufFeedback) -> Option<Self> {
         let egl = eglgbm::EglDisplay::new(render_node).unwrap();
         Self::with_egl(egl, Some(feedback), None)
     }
@@ -62,7 +62,7 @@ impl RendererStateImp {
 
     fn with_egl(
         egl: eglgbm::EglDisplay,
-        feedback: Option<DmabufFeedback>,
+        feedback: Option<&DmabufFeedback>,
         format_table: Option<&FormatTable>,
     ) -> Option<Self> {
         eprintln!("EGL v{}.{}", egl.major_version(), egl.minor_version());
@@ -604,7 +604,7 @@ impl Framebuffer {
     }
 }
 
-fn format_table_from_feedback(egl: &eglgbm::EglDisplay, feedback: DmabufFeedback) -> FormatTable {
+fn format_table_from_feedback(egl: &eglgbm::EglDisplay, feedback: &DmabufFeedback) -> FormatTable {
     let format_table = feedback.format_table();
     let mut formats = FormatTable::new();
 

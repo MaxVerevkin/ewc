@@ -15,8 +15,8 @@ use crate::seat::{ClientSeat, DataSource};
 use crate::wayland_core::*;
 use crate::{State, ToFlushSet};
 
-use wayrs_core::transport::{PeekHeaderError, RecvMessageError};
 use wayrs_core::MessageBuffersPool;
+use wayrs_core::transport::{PeekHeaderError, RecvMessageError};
 
 pub struct Connection {
     client_id: ClientId,

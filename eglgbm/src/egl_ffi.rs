@@ -142,7 +142,7 @@ pub const EGL_DMA_BUF_PLANE_MODIFIER_HI_EXT: [EGLint; 4] = [
     EGL_DMA_BUF_PLANE3_MODIFIER_HI_EXT,
 ];
 
-extern "C" {
+unsafe extern "C" {
     pub fn eglQueryString(dpy: EGLDisplay, name: EGLint) -> *const c_char;
 
     pub fn eglGetPlatformDisplay(

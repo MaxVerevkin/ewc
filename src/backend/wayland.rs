@@ -1,12 +1,10 @@
 use std::collections::VecDeque;
 use std::os::fd::AsRawFd;
 
-use wayrs_client::global::{Global, GlobalsExt};
 use wayrs_client::proxy::Proxy as _;
-use wayrs_client::Connection;
-use wayrs_client::IoMode;
-use wayrs_client::{protocol::*, EventCtx};
-use wayrs_protocols::linux_dmabuf_unstable_v1::*;
+use wayrs_client::{Connection, IoMode};
+use wayrs_client::{EventCtx, protocol::*};
+use wayrs_protocols::linux_dmabuf_v1::*;
 use wayrs_protocols::xdg_shell::*;
 use wayrs_utils::dmabuf_feedback::{DmabufFeedback, DmabufFeedbackHandler};
 use wayrs_utils::seats::{SeatHandler, Seats};
@@ -20,42 +18,46 @@ struct BackendImp {
 }
 
 pub fn new() -> Option<Box<dyn Backend>> {
-    let InitState {
-        mut conn,
-        globals,
-        dmabuf,
-    } = InitState::connect()?;
+    let mut conn = Connection::connect()
+        .map_err(|_| eprintln!("backend/wayland: could not connect to a wayland compositor"))
+        .ok()?;
+    conn.blocking_roundtrip()
+        .map_err(|_| eprintln!("backend/wayland: roundtrip failed"))
+        .ok()?;
 
-    let seats = Seats::bind(&mut conn, &globals);
-    let wl_compositor: WlCompositor = globals.bind(&mut conn, 5..=6).unwrap();
-    let xdg_wm_base: XdgWmBase = globals.bind(&mut conn, 1).unwrap();
+    let seats = Seats::bind(&mut conn);
+    let wl_compositor: WlCompositor = conn
+        .bind_singleton(5..=6)
+        .map_err(|_| eprintln!("backend/wayland: wl_compositor v5-6 is required"))
+        .ok()?;
+    let xdg_wm_base: XdgWmBase = conn
+        .bind_singleton(1)
+        .map_err(|_| eprintln!("backend/wayland: xdg_wb_base is required"))
+        .ok()?;
+    let linux_dmabuf: Option<ZwpLinuxDmabufV1> = conn
+        .bind_singleton(4)
+        .map_err(|_| eprintln!("backend/wayland: linux-dmabuf is not supported"))
+        .ok();
 
     let wl_surface = wl_compositor.create_surface(&mut conn);
     let xdg_surface = xdg_wm_base.get_xdg_surface_with_cb(&mut conn, wl_surface, xdg_surface_cb);
     let xdg_toplevel = xdg_surface.get_toplevel_with_cb(&mut conn, xdg_toplevel_cb);
     wl_surface.commit(&mut conn);
 
-    let renderer_kind = match dmabuf {
-        Some((linux_dmabuf, feedback)) if std::env::var_os("EWC_NO_GL").is_none() => {
-            let drm_device =
-                eglgbm::DrmDevice::new_from_id(feedback.main_device().unwrap()).unwrap();
-            let render_node_path = drm_device.render_node().unwrap();
-            RendererKind::OpenGl {
-                linux_dmabuf,
-                swapchain: None,
-                state: Box::new(gl46_renderer::RendererStateImp::new(
-                    render_node_path,
-                    feedback,
-                )?),
-            }
-        }
+    let renderer_kind = match linux_dmabuf {
+        Some(linux_dmabuf) if std::env::var_os("EWC_NO_GL").is_none() => RendererKind::OpenGl {
+            linux_dmabuf,
+            swapchain: None,
+            feedback: DmabufFeedback::get_default(&mut conn, linux_dmabuf),
+            state: None,
+        },
         _ => RendererKind::Pixman {
-            shm: ShmAlloc::bind(&mut conn, &globals).unwrap(),
+            shm: ShmAlloc::bind(&mut conn).unwrap(),
             state: pixman_renderer::RendererStateImp::new(),
         },
     };
 
-    let state = State {
+    let mut state = State {
         backend_events_queue: VecDeque::new(),
         renderer_kind,
 
@@ -73,6 +75,26 @@ pub fn new() -> Option<Box<dyn Backend>> {
         width: 80,
         height: 60,
     };
+
+    if linux_dmabuf.is_some() {
+        loop {
+            conn.dispatch_events(&mut state);
+            conn.flush(IoMode::Blocking).unwrap();
+
+            let RendererKind::OpenGl {
+                state: gl_state, ..
+            } = &mut state.renderer_kind
+            else {
+                unreachable!()
+            };
+            if gl_state.is_some() {
+                break;
+            }
+
+            conn.recv_events(IoMode::Blocking).unwrap();
+        }
+    }
+
     conn.flush(IoMode::Blocking).unwrap();
     Some(Box::new(BackendImp { conn, state }))
 }
@@ -110,7 +132,7 @@ impl Backend for BackendImp {
     fn renderer_state(&mut self) -> &mut dyn RendererState {
         match &mut self.state.renderer_kind {
             RendererKind::Pixman { state, .. } => state,
-            RendererKind::OpenGl { state, .. } => state.as_mut(),
+            RendererKind::OpenGl { state, .. } => state.as_mut().unwrap().as_mut(),
         }
     }
 
@@ -154,8 +176,10 @@ impl Backend for BackendImp {
             RendererKind::OpenGl {
                 linux_dmabuf,
                 swapchain,
+                feedback: _,
                 state,
             } => 'blk: {
+                let state = state.as_mut().unwrap();
                 if let Some(sw) = swapchain {
                     if sw.width != self.state.width || sw.height != self.state.height {
                         let sw = swapchain.take().unwrap();
@@ -258,7 +282,9 @@ enum RendererKind {
     OpenGl {
         linux_dmabuf: ZwpLinuxDmabufV1,
         swapchain: Option<GlSwapchain>,
-        state: Box<gl46_renderer::RendererStateImp>,
+        feedback: DmabufFeedback,
+        // TODO: instead of wrapping this in an Option, make GL renderer capable of switching main device at runtime, and make it work initially without any main device.
+        state: Option<Box<gl46_renderer::RendererStateImp>>,
     },
 }
 
@@ -340,6 +366,29 @@ impl SeatHandler for State {
         }
         self.backend_events_queue
             .push_back(BackendEvent::PointerRemoved(ptr.id));
+    }
+}
+
+impl DmabufFeedbackHandler for State {
+    fn get_dmabuf_feedback(&mut self, wl: ZwpLinuxDmabufFeedbackV1) -> &mut DmabufFeedback {
+        let RendererKind::OpenGl { feedback, .. } = &mut self.renderer_kind else { unreachable!() };
+        assert_eq!(feedback.wl(), wl);
+        feedback
+    }
+
+    fn feedback_done(&mut self, _conn: &mut Connection<Self>, wl: ZwpLinuxDmabufFeedbackV1) {
+        let RendererKind::OpenGl {
+            feedback, state, ..
+        } = &mut self.renderer_kind
+        else {
+            unreachable!()
+        };
+        assert_eq!(feedback.wl(), wl);
+        let drm_device = eglgbm::DrmDevice::new_from_id(feedback.main_device().unwrap()).unwrap();
+        let render_node_path = drm_device.render_node().unwrap();
+        *state = Some(Box::new(
+            gl46_renderer::RendererStateImp::new(render_node_path, feedback).unwrap(),
+        ));
     }
 }
 
@@ -490,70 +539,6 @@ fn xdg_toplevel_cb(ctx: EventCtx<State, XdgToplevel>) {
             ctx.conn.break_dispatch_loop();
         }
         _ => unreachable!(),
-    }
-}
-
-struct InitState {
-    conn: Connection<State>,
-    globals: Vec<Global>,
-    dmabuf: Option<(ZwpLinuxDmabufV1, DmabufFeedback)>,
-}
-
-impl InitState {
-    fn connect() -> Option<Self> {
-        let (mut conn, globals) = Connection::<S>::connect_and_collect_globals()
-            .map_err(|_| eprintln!("backend/wayland: could not connect to a wayland compositor"))
-            .ok()?;
-        let linux_dmabuf = globals
-            .bind::<ZwpLinuxDmabufV1, _>(&mut conn, 4)
-            .map_err(|_| eprintln!("backend/wayland: linux-dmabuf is not supported"))
-            .ok();
-        let dmabuf = match linux_dmabuf {
-            Some(linux_dmabuf) => {
-                let mut s = S {
-                    feedback: DmabufFeedback::get_default(&mut conn, linux_dmabuf),
-                    done: false,
-                };
-                while !s.done {
-                    conn.flush(IoMode::Blocking)
-                        .map_err(|e| eprintln!("backend/wayland: io error: {e}"))
-                        .ok()?;
-                    conn.recv_events(IoMode::Blocking)
-                        .map_err(|e| eprintln!("backend/wayland: io error: {e}"))
-                        .ok()?;
-                    conn.dispatch_events(&mut s);
-                }
-                s.feedback.wl().destroy(&mut conn);
-                Some((linux_dmabuf, s.feedback))
-            }
-            None => None,
-        };
-
-        struct S {
-            feedback: DmabufFeedback,
-            done: bool,
-        }
-        impl DmabufFeedbackHandler for S {
-            fn get_dmabuf_feedback(
-                &mut self,
-                _wl: ZwpLinuxDmabufFeedbackV1,
-            ) -> &mut DmabufFeedback {
-                &mut self.feedback
-            }
-            fn feedback_done(
-                &mut self,
-                _conn: &mut Connection<Self>,
-                _wl: ZwpLinuxDmabufFeedbackV1,
-            ) {
-                self.done = true;
-            }
-        }
-
-        Some(Self {
-            conn: conn.clear_callbacks(),
-            globals,
-            dmabuf,
-        })
     }
 }
 

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use wayrs_client::{global::GlobalsExt, Connection, IoMode};
+use wayrs_client::{Connection, IoMode};
 
 wayrs_client::generate!("../protocol/ewc-debug.xml");
 use ewc_debug_v1::Interest;
@@ -32,9 +32,10 @@ fn main() {
         usage();
     }
 
-    let (mut conn, globals) = Connection::<()>::connect_and_collect_globals().unwrap();
+    let mut conn = Connection::<()>::connect().unwrap();
+    conn.blocking_roundtrip().unwrap();
 
-    let debug: EwcDebugV1 = globals.bind(&mut conn, 1).expect("unsupported compositor");
+    let debug: EwcDebugV1 = conn.bind_singleton(1).expect("unsupported compositor");
     debug.get_debugger_with_cb(&mut conn, interest, |ctx| {
         use ewc_debugger_v1::Event;
         match ctx.event {

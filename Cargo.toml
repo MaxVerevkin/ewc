@@ -4,7 +4,7 @@ members = [".", "eglgbm", "ewc-wayland-scanner", "ewcdbg", "libseat"]
 [workspace.package]
 authors = ["MaxVerevkin <maxxverrr@gmail.com>"]
 readme = "README.md"
-edition = "2021"
+edition = "2024"
 
 [package]
 name = "ewc"
@@ -21,26 +21,23 @@ bytemuck = "1.14"
 drm = "0.12"
 input = "0.9"
 libc = "0.2"
-memmap2 = "0.8"
-pixman = "0.1"
+memmap2 = "0.9"
+pixman = "0.2"
 serde = { version = "1.0", features = ["derive"] }
 shmemfdrs2 = "1.0"
 signal-hook = "0.3"
-toml_edit = { version = "0.21", features = ["serde"] }
+toml_edit = { version = "0.22", features = ["serde"] }
 wayrs-core = "1.0"
 xcursor = "0.3"
-xkbcommon = "0.7.0"
+xkbcommon = "0.8"
 
 gbm-sys = "0.3"
 eglgbm = { path = "./eglgbm" }
 gl46 = "0.2"
 
 wayrs-client = "1.0"
-wayrs-protocols = { version = "0.13", features = ["xdg-shell", "linux-dmabuf-unstable-v1"] }
-wayrs-utils = { version = "0.14", features = ["shm_alloc", "seats", "cursor", "dmabuf_feedback"] }
-
-[patch.crates-io]
-pixman = { git = "https://github.com/cmeissl/pixman-rs", rev = "a7bf452" }
+wayrs-protocols = { version = "0.14", features = ["xdg-shell", "linux-dmabuf-v1"] }
+wayrs-utils = { version = "0.17", features = ["shm_alloc", "seats", "cursor", "dmabuf_feedback"] }
 
 [profile.release]
 overflow-checks = true

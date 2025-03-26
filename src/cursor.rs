@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use crate::Proxy;
 use crate::backend::Backend;
 use crate::buffer_transform::BufferTransform;
 use crate::client::ClientId;
 use crate::globals::compositor::Surface;
 use crate::protocol::wl_output;
 use crate::protocol::wp_cursor_shape_device_v1::Shape;
-use crate::Proxy;
 
 pub struct Cursor {
     kind: Kind,

@@ -26,10 +26,14 @@ pub enum EglError {
     #[error("EGL_MESA_platform_surfaceless is not supported")]
     Success,
     /// EGL is not initialized, or could not be initialized, for the specified EGL display connection.
-    #[error("EGL is not initialized, or could not be initialized, for the specified EGL display connection.")]
+    #[error(
+        "EGL is not initialized, or could not be initialized, for the specified EGL display connection."
+    )]
     NotInitialized,
     /// EGL cannot access a requested resource (for example a context is bound in another thread).
-    #[error("EGL cannot access a requested resource (for example a context is bound in another thread).")]
+    #[error(
+        "EGL cannot access a requested resource (for example a context is bound in another thread)."
+    )]
     BadAccess,
     /// EGL failed to allocate resources for the requested operation.
     #[error("EGL failed to allocate resources for the requested operation.")]
@@ -44,16 +48,22 @@ pub enum EglError {
     #[error("An EGLConfig argument does not name a valid EGL frame buffer configuration.")]
     BadConfig,
     /// The current surface of the calling thread is a window, pixel buffer or pixmap that is no longer valid.
-    #[error("The current surface of the calling thread is a window, pixel buffer or pixmap that is no longer valid.")]
+    #[error(
+        "The current surface of the calling thread is a window, pixel buffer or pixmap that is no longer valid."
+    )]
     BadCurrentSurface,
     /// An EGLDisplay argument does not name a valid EGL display connection.
     #[error("An EGLDisplay argument does not name a valid EGL display connection.")]
     BadDisplay,
     /// An EGLSurface argument does not name a valid surface (window, pixel buffer or pixmap) configured for GL rendering.
-    #[error("An EGLSurface argument does not name a valid surface (window, pixel buffer or pixmap) configured for GL rendering.")]
+    #[error(
+        "An EGLSurface argument does not name a valid surface (window, pixel buffer or pixmap) configured for GL rendering."
+    )]
     BadSurface,
     /// Arguments are inconsistent (for example, a valid context requires buffers not supplied by a valid surface).
-    #[error("Arguments are inconsistent (for example, a valid context requires buffers not supplied by a valid surface).")]
+    #[error(
+        "Arguments are inconsistent (for example, a valid context requires buffers not supplied by a valid surface)."
+    )]
     BadMatch,
     /// One or more argument values are invalid.
     #[error("One or more argument values are invalid.")]
@@ -65,7 +75,9 @@ pub enum EglError {
     #[error("A NativeWindowType argument does not refer to a valid native window.")]
     BadNativeWindow,
     /// A power management event has occurred. The application must destroy all contexts and reinitialise OpenGL ES state and objects to continue rendering.
-    #[error("A power management event has occurred. The application must destroy all contexts and reinitialise OpenGL ES state and objects to continue rendering.")]
+    #[error(
+        "A power management event has occurred. The application must destroy all contexts and reinitialise OpenGL ES state and objects to continue rendering."
+    )]
     ContextLost,
     /// Unknown EGL error.
     #[error("Unknown EGL error.")]

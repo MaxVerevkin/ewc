@@ -32,6 +32,7 @@ pub trait Backend {
 pub trait RendererState: Any {
     fn supported_shm_formats(&self) -> &[protocol::wl_shm::Format];
     fn supported_dma_buf_formats(&self) -> Option<&eglgbm::FormatTable>;
+    #[expect(clippy::mutable_key_type)] // This is OK because WlShmPool's hash implementation does not depend on the mutable part of the object
     fn get_shm_state(&mut self) -> &mut HashMap<protocol::WlShmPool, ShmPool>;
     fn create_argb8_texture(&mut self, width: u32, height: u32, bytes: &[u8]) -> BufferId;
     fn create_shm_buffer(&mut self, spec: ShmBufferSpec, resource: protocol::WlBuffer);

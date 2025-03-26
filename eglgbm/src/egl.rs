@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
-use std::ffi::{c_void, CStr};
+use std::ffi::{CStr, c_void};
 use std::fmt;
 use std::os::fd::{AsRawFd, RawFd};
 
-use crate::{egl_ffi, gbm, BufferExport, Error, FormatTable, Fourcc, GraphicsApi, Result};
+use crate::{BufferExport, Error, FormatTable, Fourcc, GraphicsApi, Result, egl_ffi, gbm};
 
 /// GBM-based EGL display
 ///

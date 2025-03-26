@@ -4,11 +4,11 @@ use std::io;
 use std::num::NonZeroU32;
 use std::rc::{Rc, Weak};
 
+use crate::State;
 use crate::client::RequestCtx;
 use crate::globals::compositor::Surface;
 use crate::protocol::xdg_toplevel::ResizeEdge;
-use crate::State;
-use crate::{protocol::*, Proxy};
+use crate::{Proxy, protocol::*};
 
 use super::{SpecificRole, XdgSurfaceRole};
 

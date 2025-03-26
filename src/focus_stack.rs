@@ -53,7 +53,7 @@ impl FocusStack {
                 && y >= 0.0
                 && x < buf_transform.dst_width() as f32
                 && y < buf_transform.dst_height() as f32
-                && surf.cur.borrow().input_region.as_ref().map_or(true, |reg| {
+                && surf.cur.borrow().input_region.as_ref().is_none_or(|reg| {
                     reg.contains_point(x.round() as i32, y.round() as i32)
                         .is_some()
                 });

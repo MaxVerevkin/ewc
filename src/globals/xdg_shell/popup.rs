@@ -2,10 +2,10 @@ use std::cell::Cell;
 use std::io;
 use std::rc::{Rc, Weak};
 
+use crate::State;
 use crate::client::RequestCtx;
 use crate::globals::compositor::Surface;
-use crate::State;
-use crate::{protocol::*, Proxy};
+use crate::{Proxy, protocol::*};
 
 use super::positioner::Positioner;
 use super::{SpecificRole, XdgSurfaceRole};
@@ -195,11 +195,11 @@ fn xdg_popup_cb(ctx: RequestCtx<XdgPopup>) -> io::Result<()> {
             *popup.xdg_surface.upgrade().unwrap().specific.borrow_mut() = SpecificRole::None;
             ctx.client.compositor.xdg_popups.remove(&ctx.proxy);
             surface.unmap(ctx.state);
-            if !ctx
+            if ctx
                 .state
                 .popup_stack
                 .last()
-                .is_some_and(|p| p.wl == popup.wl)
+                .is_none_or(|p| p.wl != popup.wl)
             {
                 return Err(io::Error::other("destroyed popup must be the top one"));
             }

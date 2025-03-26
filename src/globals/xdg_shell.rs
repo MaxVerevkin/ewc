@@ -3,13 +3,13 @@ use std::io;
 use std::num::NonZeroU32;
 use std::rc::{Rc, Weak};
 
-use super::compositor::{Surface, SurfaceRole};
 use super::IsGlobal;
+use super::compositor::{Surface, SurfaceRole};
+use crate::State;
 use crate::client::RequestCtx;
 use crate::protocol::xdg_toplevel::ResizeEdge;
 use crate::protocol::*;
 use crate::wayland_core::Proxy;
-use crate::State;
 
 pub mod popup;
 pub mod positioner;

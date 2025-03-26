@@ -5,13 +5,13 @@ use std::hash::{Hash, Hasher};
 use std::io;
 use std::rc::{Rc, Weak};
 
+use crate::State;
 use crate::client::{Client, ClientId, Connection, RequestCtx, ResourceCallback};
 use crate::protocol::*;
-use crate::State;
 
 pub use wayrs_core::{
-    transport::BufferedSocket, ArgType, ArgValue, Fixed, Interface, IoMode, Message, MessageDesc,
-    MessageHeader, ObjectId,
+    ArgType, ArgValue, Fixed, Interface, IoMode, Message, MessageDesc, MessageHeader, ObjectId,
+    transport::BufferedSocket,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -191,7 +191,7 @@ impl Object {
 
 impl PartialEq for Object {
     fn eq(&self, other: &Self) -> bool {
-        Rc::as_ptr(&self.inner) == Rc::as_ptr(&other.inner)
+        std::ptr::eq(Rc::as_ptr(&self.inner), Rc::as_ptr(&other.inner))
     }
 }
 
