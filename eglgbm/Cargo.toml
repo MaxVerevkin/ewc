@@ -6,6 +6,6 @@ readme.workspace = true
 edition.workspace = true
 
 [dependencies]
-gbm-sys = "0.3"
+gbm-sys = "0.4"
 libc = "0.2"
-thiserror = "1.0"
+thiserror = "2.0"

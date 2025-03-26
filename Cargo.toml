@@ -18,7 +18,7 @@ ewc-wayland-scanner = { path = "ewc-wayland-scanner" }
 libseat = { path = "./libseat" }
 
 bytemuck = "1.14"
-drm = "0.12"
+drm = "0.14"
 input = "0.9"
 libc = "0.2"
 memmap2 = "0.9"
@@ -31,7 +31,7 @@ wayrs-core = "1.0"
 xcursor = "0.3"
 xkbcommon = "0.8"
 
-gbm-sys = "0.3"
+gbm-sys = "0.4"
 eglgbm = { path = "./eglgbm" }
 gl46 = "0.2"
 
