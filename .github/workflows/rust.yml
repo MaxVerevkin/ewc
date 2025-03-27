@@ -48,7 +48,7 @@ jobs:
         with:
           components: rustfmt
       - name: Fmt check
-        run: rustfmt --check --edition 2021 $(fd -e rs)
+        run: rustfmt --check --edition 2024 $(fd -e rs)
 
   clippy:
     name: Clippy
