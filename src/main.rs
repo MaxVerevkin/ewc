@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::env;
 use std::io;
 use std::num::NonZeroU32;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -540,16 +540,6 @@ impl Drop for Server {
     }
 }
 
-pub fn pipe() -> io::Result<(OwnedFd, OwnedFd)> {
-    let mut fds = [0, 0];
-    if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } == -1 {
-        return Err(io::Error::last_os_error());
-    }
-    assert_ne!(fds[0], -1);
-    assert_ne!(fds[1], -1);
-    Ok(unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) })
-}
-
 fn select_socket_name(xdg_runtime: &Path) -> Option<(String, PathBuf)> {
     for num in 0..10 {
         let socket_name = format!("wayland-{num}");
@@ -568,11 +558,13 @@ fn main() {
     let (socket_name, socket_path) =
         select_socket_name(&xdg_runtime).expect("could not select socket");
 
-    let (quit_read, quit_write) = pipe().unwrap();
-    signal_hook::low_level::pipe::register(signal_hook::consts::SIGTERM, quit_write.as_raw_fd())
-        .unwrap();
-    signal_hook::low_level::pipe::register(signal_hook::consts::SIGINT, quit_write.as_raw_fd())
-        .unwrap();
+    let (quit_read, quit_write) = io::pipe().unwrap();
+    signal_hook::low_level::pipe::register(
+        signal_hook::consts::SIGTERM,
+        quit_write.try_clone().unwrap(),
+    )
+    .unwrap();
+    signal_hook::low_level::pipe::register(signal_hook::consts::SIGINT, quit_write).unwrap();
 
     let mut server = Server::new(socket_path);
     server
