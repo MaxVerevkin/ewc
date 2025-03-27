@@ -6,7 +6,7 @@ authors = [
   "Poly <marynczak.bartlomiej@gmail.com>",
   "MaxVerevkin <maxxverrr@gmail.com>",
 ]
-edition = "2021"
+edition = "2024"
 
 keywords = ["libseat"]
 license = "MIT"

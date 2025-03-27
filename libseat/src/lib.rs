@@ -3,7 +3,7 @@ use libseat_sys as sys;
 use std::{
     cell::RefCell,
     collections::VecDeque,
-    ffi::{c_void, CString},
+    ffi::{CString, c_void},
     io,
     os::{
         fd::{FromRawFd, OwnedFd},
